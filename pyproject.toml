@@ -6,9 +6,22 @@ readme = "LEEME.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "edge-tts>=7.2,<8",
+    "faiss-cpu>=1.15.1",
+    "google-genai>=2.34.0",
+    "numpy>=2.4.6",
     "pygame>=2.6,<3",
+    "sentence-transformers>=6.2.0",
     "smbus2>=0.5,<1",
+    "torch>=2.15.0",
 ]
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
