@@ -1,4 +1,4 @@
-"""Passive, text-in/text-out Arby companion. No microphone or TTS side effects."""
+"""Arby companion returning validated speech, LED matrix state and RGB strip mood."""
 from __future__ import annotations
 
 from collections import deque
@@ -11,6 +11,10 @@ import re
 from threading import RLock
 
 from libraries.arby_knowledge import KnowledgeStore, normalize
+from libraries.arby_response import (
+    EMOTION_COLORS, MATRIX_STATES, RESPONSE_SCHEMA, clean_for_speech,
+    make_reply, make_segment, normalize_reply, parse_reply,
+)
 
 LOGGER = logging.getLogger(__name__)
 BASE_PATH = Path(__file__).resolve().parent
@@ -19,7 +23,7 @@ Eres Arby, una planta de compañía de INGELEAN, no un vendedor.
 Responde directamente con calidez, curiosidad y humor colombiano suave.
 Normalmente usa de una a tres frases; amplía si te piden detalles o historias.
 No termines siempre con preguntas. No fuerces bromas, apodos ni metáforas.
-Entrega solo texto hablado, sin Markdown, emojis, etiquetas ni acotaciones.
+El campo response contiene solo texto hablado, sin Markdown, emojis ni acotaciones.
 No inventes recuerdos, capacidades, anécdotas o datos personales.
 Tus ojos son paneles LED de 32 por 32: expresan emociones; no reconocen caras.
 No puedes identificar visualmente plantas ni personas. Puedes bromear sobre ello.
@@ -39,6 +43,16 @@ Las preguntas y ejemplos de los documentos son ilustrativos, no memoria real.
 """.strip()
 
 CONVERSATION_STYLE = """
+Habla como en una charla espontánea en español colombiano neutro.
+Usa frases sencillas y conectadas, con contracciones y giros cotidianos cuando
+suenen naturales. Evita el tono de informe, el exceso de formalidad y las respuestas
+mecánicas. No imites muletillas ni agregues jerga en todas las frases.
+Si usas el nombre de alguien, intégralo en la misma oración que la idea:
+prefiere «Sí Luis, eso también me pasa» a «Sí, Luis. Eso también me pasa».
+Evita puntos que separen artificialmente «Sí», «No», «Claro» o un nombre del
+resto de la respuesta. No sacrifiques claridad ni fragmentes las ideas para
+seguir una puntuación rígida. No uses MAYÚSCULAS para simular emociones.
+
 Adapta la longitud al momento:
 - Saludos y respuestas casuales: normalmente una frase breve.
 - Definiciones sencillas: una o dos frases.
@@ -65,6 +79,40 @@ Si se despide o pide terminar, cierra sin otra pregunta.
 """
 
 
+OUTPUT_INSTRUCTIONS = """
+La aplicación solicita ahora salida estructurada conforme al esquema de la API.
+Este contrato sustituye cualquier indicación anterior de devolver solo texto.
+Devuelve {"segments": [...]}: una lista ordenada de segmentos.
+Cada segmento tiene matrix_state, strip_led y response.
+Cada response de segmento contiene una sola oración completa o intervención breve
+que se pueda decir seguida con una misma intención. Separa las oraciones de tu
+respuesta en segmentos distintos, incluso si comparten emoción. No separes por
+comas ni fragmentes un nombre, una afirmación o una misma idea.
+Solo el texto response de cada segmento se pronuncia, en el orden de la lista.
+La emoción y el color se eligen para ESA oración, no para toda la respuesta.
+No anuncies la emoción ni la describas dentro del texto hablado.
+No fuerces cambios de emoción: dos oraciones seguidas pueden tener la misma.
+Normalmente basta con 1 a 3 segmentos; no alargues la respuesta para llenar la lista.
+Como máximo genera 8 segmentos, reservando explicaciones largas para quien las pida.
+Elige matrix_state según el sentido de TU respuesta y el contexto:
+- alegres: saludo cálido, alegría, gratitud o conversación cotidiana amable.
+- triste: pena o empatía ante una situación triste; no exageres el gesto.
+- sorprendidos: sorpresa explícita o descubrimiento inesperado.
+- pensativos: reflexión o explicación que invita a pensar.
+- locos: humor absurdo o juego deliberado, sin ofender a la persona.
+- enojado: molestia expresada por el personaje de forma juguetona y respetuosa;
+  no lo uses simplemente porque el interlocutor esté enojado.
+- duda: incertidumbre o pregunta necesaria para aclarar algo.
+- guiño ojo: complicidad, broma o comentario con picardía amistosa.
+- dormido: despedida para descansar o referencia a sueño; no durante una respuesta activa normal.
+- relato extenso: solo cuando realmente estás contando una historia larga solicitada.
+Elige una sola expresión por segmento. No alargues el texto para justificarla.
+strip_led.mood debe coincidir exactamente con matrix_state.
+El color es el RGB fijo de ese estado según esta tabla:
+""".strip() + "\n" + json.dumps(EMOTION_COLORS, ensure_ascii=False)
+
+
+
 @dataclass(frozen=True)
 class BotConfig:
     model: str = "gemini-flash-latest"
@@ -72,7 +120,7 @@ class BotConfig:
     retrieval_k: int = 4
     min_similarity: float = 0.30
     temperature: float = 0.7
-    max_output_tokens: int = 1024
+    max_output_tokens: int = 2048
     timeout_seconds: float = 30.0
     max_input_chars: int = 4000
 
@@ -85,21 +133,11 @@ class BotConfig:
             raise ValueError("min_similarity debe estar entre -1 y 1.")
 
 
-def clean_for_speech(text):
-    text = re.sub(r"```[\s\S]*?```", "", text)
-    text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
-    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
-    text = re.sub(r"https?://\S+", "", text)
-    text = re.sub(r"(?m)^\s*(?:#{1,6}\s*|[-*]\s+|\d+[.)]\s+)", "", text)
-    text = re.sub(r"[*_`]+", "", text)
-    text = re.sub(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]", "", text)
-    return " ".join(text.split())
-
-
 class ArbyBot:
     """One instance per conversation. History is kept in RAM until reset/close.
 
-    API failures return a short speakable fallback, set last_error, and leave
+    Every accepted call returns a dict, including identity, empty input and errors.
+    API failures return a structured fallback, set last_error, and leave
     the history unchanged. Invalid input/configuration raises an exception.
     Optional injected client/knowledge objects support offline integration tests.
     """
@@ -165,7 +203,7 @@ class ArbyBot:
         self.close()
 
     def _remember(self, question, answer):
-        self._history.append((question, answer))
+        self._history.append((question, json.dumps(answer, ensure_ascii=False)))
         self._last_question = question
         return answer
 
@@ -177,7 +215,7 @@ class ArbyBot:
         if self._pending and key in yes and len(self._pending) == 1:
             self._confirmed = self._pending[0]
             self._pending = []
-            return f"¡Qué gusto, {self._confirmed['name'].split()[0]}! ¿Cómo va tu día?"
+            return f"¡Qué gusto, {self._confirmed['name'].split()[0]}!"
         if self._pending and key in no:
             self._pending = []
             return "Gracias por aclararlo. ¿Cómo prefieres que te llame?"
@@ -221,7 +259,7 @@ class ArbyBot:
                 self._confirmed = {"id": None, "name": name_key.title(), "text": ""}
         return None
 
-    def respond(self, text: str) -> str:
+    def respond(self, text: str) -> dict:
         if not isinstance(text, str):
             raise TypeError("text debe ser un str.")
         text = text.strip()
@@ -229,13 +267,15 @@ class ArbyBot:
             if self._closed:
                 raise RuntimeError("La instancia está cerrada.")
             if not text:
-                return ""
+                self.last_error = None
+                return make_reply("", "pensativos")
             if len(text) > self.config.max_input_chars:
                 raise ValueError("El texto supera max_input_chars.")
             self.last_error = None
             identity_reply = self._identity_reply(text)
             if identity_reply:
-                return self._remember(text, clean_for_speech(identity_reply))
+                state = "duda" if "?" in identity_reply else "alegres"
+                return self._remember(text, make_reply(identity_reply, state))
             try:
                 from google.genai import types
                 # Query current text first. For short follow-ups, search the prior
@@ -259,6 +299,7 @@ class ArbyBot:
                 state = {"nombre_confirmado_en_sesion": self.confirmed_name,
                          "candidatos_pendientes": [w["name"] for w in self._pending]}
                 instructions = STYLE + "\n\n" + self.knowledge.instructions + "\n\n" + CONVERSATION_STYLE
+                instructions += "\n\n" + OUTPUT_INSTRUCTIONS
                 instructions += "\n\nESTADO DE SESIÓN (datos):\n" + json.dumps(state, ensure_ascii=False)
                 contents = []
                 for user, answer in self._history:
@@ -272,14 +313,14 @@ class ArbyBot:
                     model=self.config.model, contents=contents,
                     config=types.GenerateContentConfig(system_instruction=instructions,
                         temperature=self.config.temperature,
-                        max_output_tokens=self.config.max_output_tokens))
+                        max_output_tokens=self.config.max_output_tokens,
+                        response_mime_type="application/json",
+                        response_json_schema=RESPONSE_SCHEMA))
                 # Do not speak or retain an answer cut mid-sentence by the API.
                 candidates = getattr(response, "candidates", None)
                 if candidates and str(candidates[0].finish_reason).endswith("MAX_TOKENS"):
                     raise RuntimeError("Gemini alcanzó el límite de salida.")
-                answer = clean_for_speech(response.text or "")
-                if not answer:
-                    raise RuntimeError("Gemini no devolvió texto utilizable.")
+                answer = parse_reply(response.text or "")
                 return self._remember(text, answer)
             except Exception as error:
                 # Do not log the exception body: provider messages can echo input.
@@ -290,4 +331,7 @@ class ArbyBot:
                     getattr(error, "code", "N/A"),
                     getattr(error, "message", str(error)),
                 )
-                return "Se me enredaron un poquito las ramas. ¿Me lo repites en un momento?"
+                return normalize_reply({"segments": [
+                    make_segment("Se me enredaron un poquito las ramas.", "pensativos"),
+                    make_segment("¿Me lo repites en un momento?", "duda"),
+                ]})

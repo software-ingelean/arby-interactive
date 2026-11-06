@@ -18,5 +18,7 @@ while True:
 
     if text:
         response = bot.respond(text)
-        print("Arby:", response)
-        tts.speak(response)
+        print("Matriz:", response["matrix_state"])
+        print("Tira LED:", response["strip_led"])
+        print("Arby:", response["response"])
+        tts.speak(response["response"])

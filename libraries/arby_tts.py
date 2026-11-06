@@ -17,9 +17,9 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class TTSConfig:
-    voice: str = "es-CO-SalomeNeural"
-    rate: str = "+12%"
-    pitch: str = "+0Hz"
+    voice: str = "es-MX-JorgeNeural"
+    rate: str = "+10%"
+    pitch: str = "-8Hz"
     volume: str = "+0%"
     ffplay_path: str = "ffplay"
     timeout_seconds: float = 120.0

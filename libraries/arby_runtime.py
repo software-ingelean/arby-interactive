@@ -1,0 +1,208 @@
+"""Serialize text and fixed phrases while exposing thread-safe visual state."""
+from concurrent.futures import Future, CancelledError
+from dataclasses import dataclass
+import logging
+from queue import Queue, Empty, Full
+import threading
+import time
+
+from .arby_eyes import EMOTION_STATES, normalize_state
+from .arby_response import normalize_reply, validate_color
+
+LOGGER = logging.getLogger(__name__)
+IDLE_COLOR = (40, 215, 255)
+
+
+def validate_reply(reply):
+    return normalize_reply(reply)
+
+
+@dataclass(frozen=True)
+class VisualState:
+    revision: int = 0
+    matrix_state: str = "default"
+    color: tuple = IDLE_COLOR
+    phase: str = "idle"
+
+
+@dataclass
+class _Request:
+    kind: str
+    payload: object
+    future: Future
+
+
+class ArbyRuntime:
+    """Own bot and TTS clients after start(); hardware remains in the main thread.
+
+    All future STT/sensor callbacks may submit work. Only one worker calls the
+    bot, speaks, or resets the session. Fixed text bypasses Gemini and history.
+    """
+
+    def __init__(self, bot, tts, *, emotion_colors, queue_size=8, minimum_display=0.5):
+        if queue_size < 1 or minimum_display < 0:
+            raise ValueError("Invalid runtime limits")
+        self.bot, self.tts = bot, tts
+        self.emotion_colors = dict(emotion_colors)
+        self.minimum_display = minimum_display
+        self._queue = Queue(maxsize=queue_size)
+        self.events = Queue()
+        self._lock = threading.RLock()
+        self._stop = threading.Event()
+        self._visual = VisualState()
+        self._thread = None
+        self._closed = False
+
+    @property
+    def visual(self):
+        with self._lock:
+            return self._visual
+
+    @property
+    def pending_count(self):
+        with self._queue.mutex:
+            return self._queue.unfinished_tasks
+
+    def _set_visual(self, state, color, phase):
+        with self._lock:
+            self._visual = VisualState(self._visual.revision + 1, state, color, phase)
+
+    def start(self):
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Runtime is closed")
+            if self._thread is None:
+                self._thread = threading.Thread(target=self._work, name="arby-conversation", daemon=True)
+                self._thread.start()
+        return self
+
+    def _submit(self, kind, payload):
+        with self._lock:
+            if self._closed or self._thread is None:
+                raise RuntimeError("Runtime must be started and open")
+            future = Future()
+            try:
+                self._queue.put_nowait(_Request(kind, payload, future))
+            except Full as exc:
+                raise RuntimeError("La cola está llena; espera a que Arby termine.") from exc
+            return future
+
+    def submit_text(self, text):
+        """Console now; STT calls this same nonblocking method later."""
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("Input text must be a nonempty string")
+        return self._submit("text", text.strip())
+
+    def submit_fixed_phrase(self, text, *, state="alegres", color=None):
+        """Future sensor hook. Speak supplied text without a Gemini request."""
+        state = normalize_state(state)
+        if state not in EMOTION_STATES:
+            raise ValueError("Fixed phrases require an emotion")
+        color = validate_color(self.emotion_colors[state] if color is None else color)
+        r, g, b = color
+        reply = validate_reply({"matrix_state": state,
+            "strip_led": {"color": {"r": r, "g": g, "b": b}, "mood": state},
+            "response": text})
+        return self._submit("fixed", reply)
+
+    def reset_session(self):
+        return self._submit("reset", None)
+
+    def _speak(self, reply):
+        started = time.monotonic()
+        color = validate_color(reply["strip_led"]["color"])
+        self._set_visual(reply["matrix_state"], color, "speaking")
+        with self._lock:
+            if self._stop.is_set():
+                raise CancelledError()
+            accepted = self.tts.speak(reply["response"])
+        if not accepted:
+            raise RuntimeError("TTS rejected the utterance")
+        while not self.tts.wait(0.05):
+            if self._stop.is_set():
+                raise CancelledError()
+        if self.tts.last_error:
+            self.events.put(("error", f"TTS: {self.tts.last_error}"))
+        self._stop.wait(max(0, self.minimum_display - (time.monotonic() - started)))
+        if self._stop.is_set():
+            raise CancelledError()
+
+    def _work(self):
+        try:
+            while not self._stop.is_set():
+                try:
+                    request = self._queue.get(timeout=0.05)
+                except Empty:
+                    continue
+                try:
+                    if not request.future.set_running_or_notify_cancel():
+                        continue
+                    if self._stop.is_set():
+                        raise CancelledError()
+                    if request.kind == "reset":
+                        self.bot.reset_session()
+                        reply = None
+                        self.events.put(("info", "Conversación reiniciada."))
+                    else:
+                        if request.kind == "text":
+                            self._set_visual("cargando", IDLE_COLOR, "loading")
+                            reply = self.bot.respond(request.payload)
+                            if self._stop.is_set():
+                                raise CancelledError()
+                            reply = validate_reply(reply)
+                        else:
+                            reply = request.payload
+                        self.events.put(("response", reply["response"]))
+                        for segment in reply["segments"]:
+                            if self._stop.is_set():
+                                raise CancelledError()
+                            self._speak(segment)
+                    request.future.set_result(reply)
+                except CancelledError as exc:
+                    request.future.set_exception(exc)
+                except Exception as exc:
+                    try:
+                        self.tts.stop()
+                    except Exception:
+                        LOGGER.warning("Playback cleanup failed")
+                    request.future.set_exception(exc)
+                    self.events.put(("error", f"No se completó la solicitud: {type(exc).__name__}"))
+                    LOGGER.debug("Request failed", exc_info=True)
+                finally:
+                    self._set_visual("default", IDLE_COLOR, "idle")
+                    self._queue.task_done()
+        finally:
+            self._cancel_pending()
+            for client in (self.tts, self.bot):
+                try:
+                    client.close()
+                except Exception:
+                    LOGGER.warning("Client cleanup failed: %s", type(client).__name__)
+
+    def _cancel_pending(self):
+        while True:
+            try:
+                request = self._queue.get_nowait()
+            except Empty:
+                return
+            request.future.cancel()
+            self._queue.task_done()
+
+    def close(self, timeout=5.0):
+        """Stop playback and pending work; an in-flight network call may finish later."""
+        with self._lock:
+            self._closed = True
+            self._stop.set()
+        self._cancel_pending()
+        try:
+            self.tts.stop()
+        except Exception:
+            LOGGER.warning("TTS stop failed")
+        if self._thread is None:
+            for client in (self.tts, self.bot):
+                client.close()
+            return True
+        if self._thread is threading.current_thread():
+            return False
+        self._thread.join(timeout)
+        return not self._thread.is_alive()
