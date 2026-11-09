@@ -7,6 +7,7 @@ from queue import Empty
 import threading
 import time
 
+from libraries.arby_env import load_environment
 from libraries.arby_eyes import EyeAnimator
 from libraries.arby_runtime import ArbyRuntime
 from libraries.arby_response import EMOTION_COLORS, normalize_reply
@@ -188,6 +189,7 @@ def _print_events(runtime):
 
 
 def main(argv=None):
+    load_environment()
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.eyes == "matrix" and args.multiplexing is None:

@@ -69,6 +69,25 @@ versiones antiguas o si configuras `"voice_engine": "espeak"`.
 
 ## Ejecución
 
+### Variables de entorno de Arby
+
+Después de `uv sync`, copia `.env.example` a `.env` si aún no existe:
+
+```bash
+cp .env.example .env
+```
+
+Edita `.env` y completa `GEMINI_API_KEY` con tu clave. También puedes usar
+`GOOGLE_API_KEY` como alternativa y cambiar `GEMINI_MODEL`.
+Ejecuta Arby con `uv run python main.py` o `uv run python run_arby.py`.
+Ambas entradas cargan el `.env` de la raíz del proyecto, incluso al ejecutar
+desde otro directorio. Las variables que ya existan en el entorno tienen
+prioridad; `--model` permite elegir el modelo para una ejecución.
+
+`.env` está excluido de Git: guarda ahí las claves locales. `.env.example`
+documenta las variables sin incluir secretos. Los archivos de `config/*.json`
+siguen siendo la configuración estructurada de voz y hardware.
+
 ```bash
 uv run python -m app.triki_humano_real
 ```
