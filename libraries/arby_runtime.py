@@ -127,6 +127,38 @@ class ArbyRuntime:
         if self._stop.is_set():
             raise CancelledError()
 
+    def _speak_reply(self, reply):
+        segments = reply["segments"]
+        speak_segments = getattr(self.tts, "speak_segments", None)
+        if not callable(speak_segments):
+            # Compatibility with older TTS adapters and the muted preview.
+            for segment in segments:
+                if self._stop.is_set():
+                    raise CancelledError()
+                self._speak(segment)
+            return
+
+        def on_segment(index):
+            if self._stop.is_set():
+                return
+            segment = segments[index]
+            self._set_visual(segment["matrix_state"],
+                             validate_color(segment["strip_led"]["color"]), "speaking")
+
+        with self._lock:
+            if self._stop.is_set():
+                raise CancelledError()
+            accepted = speak_segments([s["response"] for s in segments], on_segment=on_segment)
+        if not accepted:
+            raise RuntimeError("TTS rejected the sequence")
+        while not self.tts.wait(0.05):
+            if self._stop.is_set():
+                raise CancelledError()
+        if self._stop.is_set():
+            raise CancelledError()
+        if self.tts.last_error:
+            self.events.put(("error", f"TTS: {self.tts.last_error}"))
+
     def _work(self):
         try:
             while not self._stop.is_set():
@@ -153,10 +185,7 @@ class ArbyRuntime:
                         else:
                             reply = request.payload
                         self.events.put(("response", reply["response"]))
-                        for segment in reply["segments"]:
-                            if self._stop.is_set():
-                                raise CancelledError()
-                            self._speak(segment)
+                        self._speak_reply(reply)
                     request.future.set_result(reply)
                 except CancelledError as exc:
                     request.future.set_exception(exc)

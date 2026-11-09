@@ -17,19 +17,21 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class TTSConfig:
-    voice: str = "es-MX-JorgeNeural"
-    rate: str = "+10%"
-    pitch: str = "-8Hz"
+    voice: str = "es-CO-SalomeNeural"
+    rate: str = "+12%"
+    pitch: str = "+0Hz"
     volume: str = "+0%"
     ffplay_path: str = "ffplay"
     timeout_seconds: float = 120.0
     max_text_chars: int = 4000
+    prefetch_segments: bool = True
+    max_prefetch_bytes: int = 4 * 1024 * 1024
     # SDL2 output settings; leave unset on Windows for the default device.
     audio_driver: str | None = None
     audio_device: str | None = None
 
     def __post_init__(self):
-        if self.timeout_seconds <= 0 or self.max_text_chars < 1:
+        if self.timeout_seconds <= 0 or self.max_text_chars < 1 or self.max_prefetch_bytes < 1:
             raise ValueError("Invalid timeout or text limit.")
 
 
@@ -44,6 +46,8 @@ class _Job:
     status: str = "starting"
     first_chunk_seconds: float | None = None
     total_seconds: float | None = None
+    segments: tuple[str, ...] | None = None
+    on_segment: Callable[[int], None] | None = None
 
 
 class ArbyTTS:
@@ -103,6 +107,27 @@ class ArbyTTS:
         if not isinstance(text, str):
             raise TypeError("text must be a str.")
         text = text.strip()
+        return self._start_job(text, interrupt=interrupt)
+
+    def speak_segments(self, texts, *, on_segment=None, interrupt=False):
+        """Stream the first phrase and prefetch one next phrase in RAM.
+
+        on_segment(index) runs on the TTS worker when audio first enters ffplay
+        for that phrase; callbacks must be short and thread-safe, never draw UI.
+        wait/stop/is_speaking cover the whole sequence, not an individual phrase.
+        """
+        if isinstance(texts, (str, bytes)):
+            raise TypeError("texts must be a sequence of strings")
+        texts = tuple(texts)
+        if any(not isinstance(text, str) or not text.strip() for text in texts):
+            raise ValueError("Each segment must contain nonempty speech text")
+        if on_segment is not None and not callable(on_segment):
+            raise TypeError("on_segment must be callable")
+        texts = tuple(text.strip() for text in texts)
+        return self._start_job(" ".join(texts), interrupt=interrupt,
+                               segments=texts, on_segment=on_segment)
+
+    def _start_job(self, text, *, interrupt, segments=None, on_segment=None):
         with self._control:
             if self._closed:
                 raise RuntimeError("ArbyTTS is closed.")
@@ -115,7 +140,7 @@ class ArbyTTS:
                     return False
                 if not self.stop():
                     raise TimeoutError("Previous speech did not stop; replacement was rejected.")
-            job = _Job()
+            job = _Job(segments=segments, on_segment=on_segment)
             with self._state:
                 self._job = job
             job.thread = threading.Thread(target=self._worker, args=(job, text),
@@ -186,10 +211,59 @@ class ArbyTTS:
             job.task = asyncio.current_task()
         if job.cancelled.is_set():
             raise asyncio.CancelledError
-        await asyncio.wait_for(self._play_stream(job, text, started),
+        operation = (self._play_segments(job, started) if job.segments is not None
+                     else self._play_stream(job, text, started))
+        await asyncio.wait_for(operation,
                                timeout=self.config.timeout_seconds)
 
-    async def _play_stream(self, job, text, started):
+    async def _collect_audio(self, text):
+        """Collect at most one future phrase, with a hard RAM limit."""
+        stream = self._stream_factory(text)
+        data = bytearray()
+        try:
+            async for chunk in stream:
+                if chunk.get("type") != "audio":
+                    continue
+                packet = chunk.get("data", b"")
+                if len(data) + len(packet) > self.config.max_prefetch_bytes:
+                    raise MemoryError("Prefetched audio exceeds max_prefetch_bytes")
+                data.extend(packet)
+            if not data:
+                raise RuntimeError("No prefetched audio received")
+            return data
+        finally:
+            if hasattr(stream, "aclose"):
+                await stream.aclose()
+
+    @staticmethod
+    async def _buffer_stream(data):
+        for offset in range(0, len(data), 16384):
+            yield {"type": "audio", "data": data[offset:offset + 16384]}
+
+    async def _play_segments(self, job, started):
+        pending = None
+        try:
+            for index, text in enumerate(job.segments):
+                if job.cancelled.is_set():
+                    raise asyncio.CancelledError
+                stream = None
+                if pending is not None:
+                    data = await pending
+                    pending = None
+                    stream = self._buffer_stream(data)
+                    del data
+                if self.config.prefetch_segments and index + 1 < len(job.segments):
+                    pending = asyncio.create_task(self._collect_audio(job.segments[index + 1]))
+                callback = (lambda i=index: job.on_segment(i)) if job.on_segment else None
+                await self._play_stream(job, text, started,
+                                        stream_override=stream, on_audio_start=callback)
+        finally:
+            if pending is not None:
+                if not pending.done():
+                    pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+
+    async def _play_stream(self, job, text, started, *, stream_override=None, on_audio_start=None):
         env = os.environ.copy()
         if self.config.audio_driver:
             env["SDL_AUDIODRIVER"] = self.config.audio_driver
@@ -201,7 +275,7 @@ class ArbyTTS:
         options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
         process = None
         stderr_task = None
-        stream = None
+        stream = stream_override
         diagnostics = bytearray()
         async def drain_stderr():
             while True:
@@ -221,7 +295,8 @@ class ArbyTTS:
                 process = await startup
                 raise
             stderr_task = asyncio.create_task(drain_stderr())
-            stream = self._stream_factory(text)
+            if stream is None:
+                stream = self._stream_factory(text)
             received = False
             job.status = "streaming"
             async for chunk in stream:
@@ -233,7 +308,10 @@ class ArbyTTS:
                 if process.returncode is not None:
                     raise RuntimeError("ffplay exited before the stream ended.")
                 if not received:
-                    job.first_chunk_seconds = time.monotonic() - started
+                    if job.first_chunk_seconds is None:
+                        job.first_chunk_seconds = time.monotonic() - started
+                    if on_audio_start is not None:
+                        on_audio_start()
                 received = True
                 process.stdin.write(data)
                 await process.stdin.drain()
