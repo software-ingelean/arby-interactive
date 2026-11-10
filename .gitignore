@@ -227,3 +227,5 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# Generated knowledge index; keep it across pulls and git stash -u.
+/libraries/bot/faiss_index/
