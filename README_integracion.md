@@ -336,3 +336,28 @@ real, el audio real ni una solicitud real a tu API.
 Al cerrar se solicita detener el audio y se espera hasta cinco segundos al worker.
 Una consulta a Gemini que ya estaba en curso no puede abortarse desde esta capa;
 si termina después del cierre, su resultado se descarta y no se reproduce.
+
+## Respuestas automáticas con Trill Craft
+
+Activa `ARBY_TRILL=true` en `.env` y ejecuta `.venv/bin/python run_arby.py`
+(o `main.py`). Este modo escucha el sensor continuamente hasta Ctrl+C, sin
+consola ni Gemini; no requiere clave de API. Conserva la voz TTS, ojos y tira
+configurados para Arby. Para ejecutarlo sin ventana usa `ARBY_EYES=none`;
+la integración del sensor no importa el script de prueba ni pygame.
+`ARBY_TRILL=false` conserva el modo de conversación por consola.
+
+Se reutiliza `config/triki_config.json`: bus I2C 1, dirección `0x30`, modo
+DIFF, prescaler, umbral de ruido, umbrales de toque/liberación, intervalo de
+lectura y duración de toque sostenido. Las zonas iniciales son cabeza (0–3),
+barriga (4–7), mano (8–11), saludo (12–13) y ayuda (14–15). Cambia `zones`
+para que coincida con tu cableado. Inicia sin tocar los electrodos: el sensor
+calibra la línea base al abrirse. I2C debe estar habilitado y accesible para
+el usuario que ejecuta Arby; `smbus2` ya está declarado como dependencia.
+
+Las frases y emociones están en `libraries/core/arby_touch.py`. Se confirma
+cada toque con dos lecturas y se detectan toques sostenidos y cuatro toques
+en diez segundos. Los canales sin zona se ignoran. Los eventos durante una
+respuesta o durante `speech_cooldown_seconds` se descartan, sin acumular voz.
+Las opciones de audio y pantalla del antiguo JSON no se utilizan: voz y
+salidas se configuran con las variables `ARBY_*` de `.env`.
+Un error de lectura I2C detiene la aplicación y libera sus recursos.

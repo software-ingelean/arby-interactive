@@ -48,6 +48,7 @@ def load_config():
         "audio_recover_on_exit": (bool, False, None),
         "mute": (bool, False, None),
         "demo": (bool, False, None),
+        "trill": (bool, False, None),
     }
     settings = {}
     for name, (convert, default, choices) in fields.items():
@@ -153,6 +154,13 @@ def main():
     stop, input_done = threading.Event(), threading.Event()
     try:
         with ExitStack() as stack:
+            touch = None
+            if args.trill:
+                from libraries.core.arby_touch import TrillReader, TouchReactions, load_touch_config
+                touch_config = load_touch_config()
+                sensor = TrillReader(touch_config)
+                stack.callback(sensor.close)
+                touch = TouchReactions(sensor, touch_config)
             # Terminal closure and service stop use the same cleanup as salir.
             if threading.current_thread() is threading.main_thread():
                 for name in ("SIGTERM", "SIGHUP", "SIGINT"):
@@ -176,7 +184,7 @@ def main():
             elif args.eyes == "preview":
                 preview = Preview(args.strip_leds)
                 stack.callback(preview.close)
-            if args.demo:
+            if args.demo or args.trill:
                 bot = DemoBot()
                 palette = bot.colors
             else:
@@ -208,12 +216,17 @@ def main():
                 clients.pop_all()  # Ownership is now held by the runtime worker.
             stack.callback(runtime.close)
             eyes = EyeAnimator()
-            reader = threading.Thread(target=_console, args=(runtime, stop, input_done),
-                                      name="arby-console", daemon=True)
-            reader.start()
+            if touch:
+                print("Estado: Trill activo; respuestas automáticas. Ctrl+C para salir.", flush=True)
+            else:
+                reader = threading.Thread(target=_console, args=(runtime, stop, input_done),
+                                          name="arby-console", daemon=True)
+                reader.start()
             revision = -1
             while not stop.is_set():
                 started = time.monotonic()
+                if touch:
+                    touch.update(runtime, started)
                 if preview and preview.requested_stop():
                     stop.set()
                     break
