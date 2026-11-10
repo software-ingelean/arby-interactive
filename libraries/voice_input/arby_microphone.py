@@ -1,0 +1,48 @@
+"""Bridge microphone recognition to the shared conversation runtime."""
+import threading
+import time
+
+
+class MicrophoneInput:
+    def __init__(self, runtime, config, stop, input_done):
+        # Optional audio dependencies are only imported in voice mode.
+        from libraries.voice_input.arby_google_vad_iir import ArbyPipeline
+        self.runtime = runtime
+        self.stop = stop
+        self.input_done = input_done
+        self.resume_at = 0.0
+        self.error = None
+        self.pipeline = ArbyPipeline(config, on_question=self.submit,
+                                     is_paused=self.is_paused)
+        self.thread = threading.Thread(target=self.run, name="arby-microphone", daemon=True)
+
+    def is_paused(self):
+        if self.runtime.pending_count:
+            # Also discard the tail of speaker audio after playback ends.
+            self.resume_at = time.monotonic() + 0.35
+            return True
+        return self.stop.is_set() or time.monotonic() < self.resume_at
+
+    def submit(self, text):
+        if not self.is_paused():
+            self.runtime.events.put(("info", f"Tú: {text}"))
+            self.runtime.submit_text(text)
+
+    def start(self):
+        self.thread.start()
+        return self
+
+    def run(self):
+        try:
+            self.pipeline.run()
+        except Exception as exc:
+            self.error = exc
+            self.runtime.events.put(("error", f"Micrófono: {type(exc).__name__}: {exc}"))
+            self.stop.set()
+        finally:
+            self.input_done.set()
+
+    def close(self):
+        self.pipeline.close()
+        if self.thread.ident is not None:
+            self.thread.join(timeout=2.0)

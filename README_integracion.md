@@ -368,3 +368,33 @@ la voz y las expresiones se coordinan mediante una sola cola de respuestas.
 Las opciones de audio y pantalla del antiguo JSON no se utilizan: voz y
 salidas se configuran con las variables `ARBY_*` de `.env`.
 Un error de lectura I2C detiene la aplicación y libera sus recursos.
+
+### Conversación por micrófono
+
+Instala el grupo opcional con `uv sync --extra voice` y configura
+`ARBY_INPUT_MODE=voice` en `.env`. Ejecuta `uv run --extra voice run_arby.py`.
+Para volver al teclado usa `ARBY_INPUT_MODE=text` (predeterminado si no existe
+la variable). `ARBY_MUTE` controla la salida de voz de forma independiente.
+En Linux, sounddevice necesita PortAudio del sistema (`libportaudio2` en Debian).
+
+La entrada reutiliza `libraries/voice_input/arby_google_vad_iir.py`: captura
+I2S estéreo S32 a 48 kHz, filtro IIR con estado, limitador, remuestreo a 16 kHz,
+Silero ONNX y reconocimiento Google en un hilo separado. La dependencia
+`silero-onnx` procede del repositorio del autor y queda fijada en `uv.lock`.
+El reconocimiento Google requiere conexión a Internet.
+
+Di **“Hola Arby, ¿qué puedes hacer?”**, o **“Hola Arby”** y luego tu pregunta
+antes de 8 segundos. Cada nueva pregunta requiere activación, como en el script
+original. No hay saludo hablado adicional al activar. La pregunta se envía al
+mismo runtime que coordina Gemini, voz, emociones y LED. Trill sigue funcionando
+en paralelo. Mientras hay una respuesta pendiente, se descarta audio de entrada;
+se retoma la escucha 350 ms después para reducir la captación de la propia voz.
+Se vacían las colas y el estado de audio al retomar; no hay interrupción por voz.
+
+`ARBY_MIC_DEVICE` selecciona el índice PortAudio o el nombre de la entrada;
+`ARBY_AUDIO_DEVICE` sigue seleccionando la salida. Para listar entradas:
+`uv run --extra voice python -m sounddevice`. El canal predeterminado es `left`;
+puedes usar `ARBY_MIC_CHANNEL=right`. Los demás ajustes están en `.env.example`.
+Las colas son acotadas y cada segmento se limita a 15 segundos para controlar
+memoria y latencia; al llegar al límite se envía ese segmento al reconocimiento.
+Ctrl+C, SIGTERM y el cierre de la ventana detienen también la captura.

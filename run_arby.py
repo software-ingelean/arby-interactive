@@ -1,9 +1,10 @@
-"""Compose console, bot, Edge TTS, animated eyes and NeoPixel strip."""
+"""Compose text/microphone input, bot, TTS, eyes and NeoPixel strip."""
 import sys
 from types import SimpleNamespace
 from queue import Empty
 from contextlib import ExitStack
 import logging
+import math
 import os
 import signal
 import threading
@@ -26,6 +27,21 @@ _console_output_lock = threading.Lock()
 def load_config():
     """Read typed settings from the process environment (including loaded .env)."""
     fields = {
+        "input_mode": (str, "text", ("text", "voice")),
+        "mic_device": (str, "0", None),
+        "mic_channel": (str, "left", ("left", "right")),
+        "mic_language": (str, "es-CO", None),
+        "mic_gain_db": (float, 6.0, None),
+        "mic_graves": (float, 80.0, None),
+        "mic_agudos": (float, 8000.0, None),
+        "mic_block_ms": (int, 20, None),
+        "mic_queue_blocks": (int, 8, None),
+        "mic_threshold": (float, 0.5, None),
+        "mic_silence_ms": (int, 450, None),
+        "mic_preroll_ms": (int, 320, None),
+        "mic_followup_seconds": (float, 8.0, None),
+        "mic_request_timeout": (float, 10.0, None),
+        "mic_max_utterance_seconds": (float, 15.0, None),
         "eyes": (str, "preview", ("preview", "none", "matrix")),
         "strip": (bool, False, None),
         "strip_gpio": (int, 12, None),
@@ -69,6 +85,23 @@ def load_config():
                 raise ValueError(f"{variable}: valor inválido ({exc})") from exc
         settings[name] = value
     config = SimpleNamespace(**settings)
+    mic_values = {name[4:]: value for name, value in settings.items() if name.startswith("mic_")}
+    if not all(math.isfinite(v) for v in mic_values.values() if isinstance(v, (int, float))):
+        raise ValueError("Los parámetros ARBY_MIC deben ser finitos.")
+    if (not 0 < config.mic_graves < config.mic_agudos < 24000
+            or not -30 <= config.mic_gain_db <= 36
+            or config.mic_block_ms not in (10, 20, 40)
+            or not 1 <= config.mic_queue_blocks <= 100
+            or not 0 < config.mic_threshold < 1
+            or not 0 < config.mic_silence_ms <= 5000
+            or not 0 <= config.mic_preroll_ms <= 2000
+            or not 0 < config.mic_followup_seconds <= 120
+            or not 0 < config.mic_request_timeout <= 120
+            or not 1 <= config.mic_max_utterance_seconds <= 60):
+        raise ValueError("Revisa los límites de ARBY_MIC en .env.example.")
+    if str(mic_values["device"]).isdigit():
+        mic_values["device"] = int(mic_values["device"])
+    config.microphone = SimpleNamespace(**mic_values)
     if config.audio_recover_on_exit and (
         config.audio_driver != "alsa" or
         config.audio_device != "plughw:CARD=Headphones,DEV=0"
@@ -218,9 +251,15 @@ def main():
             eyes = EyeAnimator()
             if touch:
                 print("Estado: Trill activo junto a la conversación; toques con respuestas automáticas.", flush=True)
-            reader = threading.Thread(target=_console, args=(runtime, stop, input_done),
-                                      name="arby-console", daemon=True)
-            reader.start()
+            if args.input_mode == "voice":
+                from libraries.voice_input.arby_microphone import MicrophoneInput
+                microphone = MicrophoneInput(runtime, args.microphone, stop, input_done)
+                stack.callback(microphone.close)
+                microphone.start()
+            else:
+                reader = threading.Thread(target=_console, args=(runtime, stop, input_done),
+                                          name="arby-console", daemon=True)
+                reader.start()
             revision = -1
             while not stop.is_set():
                 started = time.monotonic()
@@ -246,6 +285,8 @@ def main():
                     break
                 stop.wait(max(0, 1/30 - (time.monotonic() - started)))
             _print_events(runtime)
+            if args.input_mode == "voice" and microphone.error is not None:
+                raise RuntimeError("Falló la entrada de micrófono; revisa el error anterior.")
     except KeyboardInterrupt:
         stop.set()
     except Exception as exc:
