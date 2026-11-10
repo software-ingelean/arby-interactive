@@ -133,13 +133,8 @@ def wake_match(text: str):
                 offsets.append(index)
     normalized = "".join(characters)
 
-    patterns = (
-        r"\bhola\s+arby\b",
-        r"\bhola\s+arbi\b",
-        r"\bhola\s+barbie\b",
-        r"\bola\s+arby\b",
-        r"\bola\s+barbie\b",
-    )
+    # Preserve the transcription variants already accepted for the name.
+    patterns = (r"\b(?:arby|arbi|barbie|army|aby|abby|David|Harry)\b",)
 
     for pattern in patterns:
         match = re.search(pattern, normalized)
@@ -193,7 +188,7 @@ class GoogleWorker(threading.Thread):
                 ):
                     self.mode = "WAKE"
                     self.deadline = None
-                    log("[TIMEOUT] No llegó una pregunta. Esperando 'Hola Arby'.")
+                    log("[TIMEOUT] No llegó una pregunta. Esperando 'Arby'.")
                 continue
 
             if self.stop_event.is_set() or self.is_paused():
@@ -255,7 +250,7 @@ class GoogleWorker(threading.Thread):
                 self.mode = "WAKE"
                 self.deadline = None
                 self.deliver(text)
-                log("[READY] Esperando 'Hola Arby'.")
+                log("[READY] Esperando 'Arby'.")
 
     def deliver(self, text):
         if self.on_question is not None and not self.stop_event.is_set():
@@ -445,7 +440,7 @@ class ArbyPipeline:
             f"silence={self.args.silence_ms} ms; "
             f"preroll={self.args.preroll_ms} ms"
         )
-        log("[READY] Di 'Hola Arby'.")
+        log("[READY] Di 'Arby'.")
 
         block_count = 0
         total_proc = 0.0

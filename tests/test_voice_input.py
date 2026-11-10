@@ -43,17 +43,23 @@ class VoiceTests(unittest.TestCase):
         return delivered
 
     def test_activation_preserves_question(self):
-        self.assertEqual(wake_match("¡Hola Arbi! ¿Cuánto es 12 + 3?"),
+        self.assertEqual(wake_match("¡Arbi! ¿Cuánto es 12 + 3?"),
                          (True, "Cuánto es 12 + 3?"))
-        self.assertEqual(self.recognize(["ruido", "Hola Arby, cuánto es 12 + 3?",
+        self.assertEqual(self.recognize(["ruido", "Arby, cuánto es 12 + 3?",
                                          "otra pregunta"]), ["cuánto es 12 + 3?"])
 
+    def test_activation_matches_whole_name(self):
+        self.assertEqual(wake_match("ARBY"), (True, ""))
+        self.assertEqual(wake_match("Arby, ¿qué hora es?"), (True, "qué hora es?"))
+        self.assertEqual(wake_match("arbyte"), (False, ""))
+        self.assertEqual(wake_match("hola"), (False, ""))
+
     def test_separate_question_requires_wake_again_after_delivery(self):
-        self.assertEqual(self.recognize(["Hola Arby", "¿Cómo estás?", "ignora esto"]),
+        self.assertEqual(self.recognize(["Arby", "¿Cómo estás?", "ignora esto"]),
                          ["¿Cómo estás?"])
 
     def test_expired_activation_does_not_deliver(self):
-        self.assertEqual(self.recognize(["Hola Arby", "pregunta tardía"], followup=-1), [])
+        self.assertEqual(self.recognize(["Arby", "pregunta tardía"], followup=-1), [])
 
     def test_inflight_recognition_is_discarded_on_pause(self):
         jobs, stop = queue.Queue(), threading.Event()
@@ -66,7 +72,7 @@ class VoiceTests(unittest.TestCase):
                 stop.set()
                 return ""
             generation[0] += 1
-            return "Hola Arby pregunta vieja"
+            return "Arby pregunta vieja"
         worker.recognizer.recognize_google = recognize
         jobs.put(b'\0' * 1024)
         jobs.put(b"\0" * 1024)

@@ -383,7 +383,7 @@ Silero ONNX y reconocimiento Google en un hilo separado. La dependencia
 `silero-onnx` procede del repositorio del autor y queda fijada en `uv.lock`.
 El reconocimiento Google requiere conexión a Internet.
 
-Di **“Hola Arby, ¿qué puedes hacer?”**, o **“Hola Arby”** y luego tu pregunta
+Di **“Arby, ¿qué puedes hacer?”**, o **“Arby”** y luego tu pregunta
 antes de 8 segundos. Cada nueva pregunta requiere activación, como en el script
 original. No hay saludo hablado adicional al activar. La pregunta se envía al
 mismo runtime que coordina Gemini, voz, emociones y LED. Trill sigue funcionando
