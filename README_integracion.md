@@ -12,15 +12,19 @@ con la existente. No reemplaces la carpeta completa ni su `__init__.py`.
 
 | Archivo | Acción |
 | --- | --- |
-| `run_arby.py` | Agregar en la raíz; compone los dispositivos y ejecuta la aplicación |
+| `run_arby.py` | Configuración, consola, composición de dispositivos y bucle principal |
+| `libraries/simulation/arby_demo_bot.py` | Bot de demostración sin conexión |
+| `libraries/simulation/arby_memory_pixels.py` | Tira LED simulada en memoria |
+| `libraries/simulation/arby_muted_tts.py` | Adaptador de voz silencioso |
+| `libraries/preview/arby_preview.py` | Vista previa de ojos y tira LED con Pygame |
 | `main.py` | Entrada mínima opcional; úsala si quieres que este sea tu main principal |
-| `libraries/arby_runtime.py` | Agregar; coordina cola, Gemini, voz y estado visual |
-| `libraries/arby_bot.py` | Reemplazar; nuevo esquema de segmentos y reglas de charla natural |
-| `libraries/arby_response.py` | Agregar; contrato compartido, validación, paleta y esquema de Gemini |
-| `libraries/arby_strip_led.py` | Agregar; adaptador sin bucles bloqueantes para la tira |
-| `libraries/control_tira_led.py` | Copiar tu archivo original a esta ruta; se incluye sin cambios |
-| `libraries/arby_eyes.py` | Reemplazar por la copia incluida, con `apply_response` y soporte RGB |
-| `libraries/matrix_output.py` | Reemplazar; agrega la opción para compartir el periférico PWM con NeoPixel |
+| `libraries/core/arby_runtime.py` | Agregar; coordina cola, Gemini, voz y estado visual |
+| `libraries/bot/arby_bot.py` | Reemplazar; nuevo esquema de segmentos y reglas de charla natural |
+| `libraries/core/arby_response.py` | Agregar; contrato compartido, validación, paleta y esquema de Gemini |
+| `libraries/leds/arby_strip_led.py` | Agregar; adaptador sin bucles bloqueantes para la tira |
+| `libraries/leds/control_tira_led.py` | Copiar tu archivo original a esta ruta; se incluye sin cambios |
+| `libraries/eyes/arby_eyes.py` | Reemplazar por la copia incluida, con `apply_response` y soporte RGB |
+| `libraries/eyes/matrix_output.py` | Reemplazar; agrega la opción para compartir el periférico PWM con NeoPixel |
 | `tests/test_integration.py` | Agregar; pruebas que no requieren Raspberry, API ni audio |
 | `tests/test_segments.py` | Agregar; pruebas del nuevo formato y sincronización por segmento |
 
@@ -44,8 +48,9 @@ if __name__ == "__main__":
 La función `main()` ocupa el hilo principal mientras funciona Arby, para
 mantener allí Pygame y los dispositivos. No debe llamarse desde un worker de GUI.
 
-Si ya habías instalado la integración anterior, reemplaza `libraries/arby_bot.py`,
-`libraries/arby_runtime.py` y `run_arby.py`, y agrega `libraries/arby_response.py`.
+Si ya habías instalado la integración anterior, reemplaza `libraries/bot/arby_bot.py`,
+`libraries/core/arby_runtime.py` y `run_arby.py`, y agrega `libraries/core/arby_response.py`
+y los módulos de simulación y vista previa de la tabla anterior.
 Los demás módulos de hardware de este ZIP conservan la versión anterior.
 Actualiza las pruebas y esta guía si las utilizas. No hay dependencias nuevas ni
 necesitas reconstruir el índice FAISS, porque las reglas cambian en el prompt del bot.
@@ -71,17 +76,23 @@ uv sync --extra led
 ```
 
 Mantén también las dependencias actuales del bot y `edge-tts`. `ffplay` debe estar
-instalado en el sistema o indicado con `--ffplay RUTA`. Después de versionar los
+instalado en el sistema o indicado con `ARBY_FFPLAY` en `.env`. Después de versionar los
 cambios de `pyproject.toml` y `uv.lock`, en la Raspberry haz pull y
 `uv sync --extra led`. Conserva `--extra led` en futuras sincronizaciones o
 ejecuciones mediante `uv run --extra led` para mantener los paquetes de hardware.
 
 ## Primera ejecución con Gemini y voz
 
+Configura todo en `.env`; `run_arby.py` y `main.py` ya no aceptan argumentos.
+Usa `ARBY_DEMO=false` y `ARBY_MUTE=false` para la ejecución real. Para escritorio
+usa `ARBY_EYES=preview`; por SSH usa `ARBY_EYES=none`. Activa la tira con
+`ARBY_STRIP=true`, configura `ARBY_STRIP_LEDS` y sincroniza con `uv sync --extra led`.
+Consulta [los perfiles de ejecución](docs/EJECUTAR_ARBY_LED.md).
+
 En un equipo con escritorio, sin activar GPIO ni requerir matrices:
 
 ```bash
-uv run python run_arby.py --eyes preview
+uv run python run_arby.py
 ```
 
 Verás los ojos y una tira simulada; escribe en la consola. La ventana debe
@@ -91,30 +102,30 @@ clave ya configurada y el índice FAISS de tu proyecto.
 Para la Raspberry con la tira real conectada y todavía sin matrices físicas:
 
 ```bash
-uv run python run_arby.py --eyes preview --strip
+uv run --extra led python run_arby.py
 ```
 
 Si estás conectado por SSH sin escritorio, usa:
 
 ```bash
-uv run python run_arby.py --eyes none --strip
+uv run --extra led python run_arby.py
 ```
 
-`--eyes none` solo desactiva la salida de ojos; la consola, Gemini, voz y tira
-continúan funcionando. La aplicación admite también `main.py` con los mismos
-argumentos.
+`ARBY_EYES=none` solo desactiva la salida de ojos; la consola, Gemini, voz y tira
+continúan funcionando. La aplicación admite también `main.py` con las mismas
+variables de entorno.
 
 Si el controlador GPIO requiere root, usa el Python de tu entorno, conservando
 las variables de la API:
 
 ```bash
-sudo --preserve-env=GEMINI_API_KEY,GOOGLE_API_KEY,GEMINI_MODEL .venv/bin/python run_arby.py --eyes none --strip
+sudo --preserve-env=GEMINI_API_KEY,GOOGLE_API_KEY,GEMINI_MODEL .venv/bin/python run_arby.py
 ```
 
 No ejecutes `sudo uv run`, pues puede usar otro entorno/configuración de uv.
 La reproducción con sudo depende de los permisos y la salida de audio del
 sistema: si la sesión de escritorio usa PulseAudio/PipeWire, root puede no
-tener acceso a esa sesión. Las opciones `--audio-driver` y `--audio-device`
+tener acceso a esa sesión. Las opciones `ARBY_AUDIO_DRIVER` y `ARBY_AUDIO_DEVICE`
 se pasan al `TTSConfig` existente para usar una salida que esté disponible en
 el usuario de ejecución. La prueba sin GPIO permite verificar la voz por separado.
 
@@ -214,10 +225,10 @@ física no son equivalentes. En respiración y rebote se modula la intensidad si
 cambiar la proporción entre canales. Durante TTS se muestra la emoción desde
 que empieza la solicitud de voz de ese segmento hasta que termina su reproducción.
 
-Puedes elegir otro efecto durante las respuestas:
+Puedes elegir otro efecto configurando `ARBY_STRIP_EFFECT=ripple` en `.env`:
 
 ```bash
-uv run python run_arby.py --eyes preview --strip --strip-effect ripple
+uv run --extra led python run_arby.py
 ```
 
 Efectos admitidos: `solid`, `breathing`, `bounce`, `center_out`, `ripple`.
@@ -230,14 +241,15 @@ no lo ejecutes a la vez que Arby sobre los mismos LED.
 Se conserva el modelo que el bot elige actualmente y los valores por defecto de
 tu `TTSConfig`. Este paquete continúa con Edge TTS; no migra a Gemini TTS.
 
-Para cambiar solo la voz desde la ejecución:
+Para cambiar la voz, configura `ARBY_VOICE=es-MX-JorgeNeural`,
+`ARBY_RATE=+12%` y `ARBY_PITCH=+0Hz` en `.env`:
 
 ```bash
-uv run python run_arby.py --eyes preview --voice es-MX-JorgeNeural --rate=+12% --pitch=+0Hz
+uv run python run_arby.py
 ```
 
-Puedes fijar el modelo con `--model` o conservar tu variable `GEMINI_MODEL`.
-`--ffplay` acepta el nombre `ffplay` o una ruta del equipo donde ejecutas.
+Fija el modelo con `GEMINI_MODEL` en `.env`.
+`ARBY_FFPLAY` acepta el nombre `ffplay` o una ruta del equipo donde ejecutas.
 
 ## STT y sensores: puntos de conexión preparados
 
@@ -293,14 +305,17 @@ Referencias: [NeoPixel en Raspberry Pi](https://learn.adafruit.com/neopixels-on-
 
 ## Prueba completamente offline
 
+Configura `ARBY_DEMO=true`, `ARBY_MUTE=true`, `ARBY_STRIP=false` y
+`ARBY_EYES=preview` en `.env` antes de ejecutar:
+
 ```bash
-uv run python run_arby.py --demo --mute --eyes preview
+uv run python run_arby.py
 ```
 
 No usa Gemini, FAISS, ffplay ni GPIO. Escribe `emociones` para ver dos oraciones
 consecutivas con alegría y reflexión. También admite nombres de emociones, por ejemplo
 `enojado`, `triste` o `sorprendidos`, para comprobar el recorrido y los colores.
-La ventana muestra también la tira simulada y sus efectos. `--mute` mantiene
+La ventana muestra también la tira simulada y sus efectos. `ARBY_MUTE=true` mantiene
 la expresión medio segundo para que sea visible.
 
 Ejecutar pruebas:

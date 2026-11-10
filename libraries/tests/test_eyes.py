@@ -5,12 +5,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-try:
-    from .arby_eyes import EyeAnimator, STATES, normalize_state
-    from .matrix_output import MatrixOutput
-except ImportError:
-    from arby_eyes import EyeAnimator, STATES, normalize_state
-    from matrix_output import MatrixOutput
+from libraries.eyes.arby_eyes import EyeAnimator, STATES, normalize_state
+from libraries.eyes.matrix_output import MatrixOutput
 
 
 class EyesTests(unittest.TestCase):

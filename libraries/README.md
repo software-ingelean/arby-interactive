@@ -1,3 +1,30 @@
+# Organización de libraries
+
+Ejecuta los ejemplos y las herramientas desde la raíz del proyecto con `python -m`.
+
+| Carpeta | Contenido |
+| --- | --- |
+| `bot/` | Bot, conocimiento, contexto Markdown y construcción del índice FAISS |
+| `audio/` | Síntesis de voz, coordinación de audio y notas de validación |
+| `eyes/` | Animación de ojos y salida a matrices físicas |
+| `leds/` | Control de la tira LED y efectos |
+| `core/` | Entorno, runtime y contrato de respuestas |
+| `simulation/` | Bot de demostración, LEDs en memoria y voz silenciosa |
+| `preview/` | Ventana de vista previa |
+| `examples/` | Ejemplos y herramientas de demostración y exportación |
+| `tests/` | Pruebas de bot, voz y ojos |
+
+```bash
+uv run python run_arby.py
+uv run python -m libraries.bot.build_arby_index
+uv run python -m libraries.examples.demo_eyes --auto
+uv run python -m libraries.examples.example_tts
+uv run python -m unittest discover -s libraries/tests -v
+```
+
+El contexto está en `libraries/bot/contexto_arby.md` y el índice generado se
+almacena en `libraries/bot/faiss_index/`. El `.env` sigue en la raíz del proyecto.
+
 # Voz de Arby por streaming
 
 La entrada es un texto completo. `edge-tts` recibe ese texto y entrega audio MP3 progresivamente; los bytes van a la entrada estándar de `ffplay`, que decodifica y reproduce. No se crean archivos de audio ni se espera a descargar toda la respuesta antes de enviarla al reproductor. Hay búferes de red y reproducción, así que no se garantiza latencia cero.
@@ -15,16 +42,16 @@ ffplay -version
 
 `ffplay` es un ejecutable de FFmpeg, no un paquete Python: no se instala con `uv add ffmpeg`. Si falta, instala una distribución de FFmpeg que lo incluya desde las opciones de [descarga de FFmpeg](https://ffmpeg.org/download.html) y añade su carpeta `bin` a PATH. Reinicia PyCharm después de cambiar PATH. También puedes indicar una ruta absoluta a `ffplay.exe`.
 
-Copia `arby_tts.py` y `plant_speech.py` dentro de `libraries/`. No reemplaces `arby_bot.py` ni `arby_knowledge.py`.
+Los módulos `arby_tts.py` y `plant_speech.py` están en `libraries/audio/`. No reemplaces `arby_bot.py` ni `arby_knowledge.py`.
 
-Para probar solamente la voz, ejecuta `example_tts.py` desde la carpeta extraída (junto a `arby_tts.py`). No requiere clave Gemini ni un token Hugging Face. La síntesis Edge sí requiere Internet.
+Para probar solamente la voz, ejecuta `uv run python -m libraries.examples.example_tts` desde la raíz del proyecto. No requiere clave Gemini ni un token Hugging Face. La síntesis Edge sí requiere Internet.
 
-Para probar conversación, copia `example_arby_voice.py` a la raíz de tu proyecto y ejecútalo con tu configuración de `GEMINI_API_KEY`. El ejemplo usa el modelo que acordamos, `gemini-3.1-flash-lite`; puedes conservar tu configuración actual si has cambiado ese modelo.
+Para probar conversación, ejecuta `uv run python -m libraries.examples.example_arby_voice` desde la raíz del proyecto con tu configuración de `GEMINI_API_KEY`. El ejemplo usa el modelo que acordamos, `gemini-3.1-flash-lite`; puedes conservar tu configuración actual si has cambiado ese modelo.
 
 ## 2. Uso de la librería
 
 ```python
-from libraries.arby_tts import ArbyTTS, TTSConfig
+from libraries.audio.arby_tts import ArbyTTS, TTSConfig
 
 tts = ArbyTTS(TTSConfig(
     voice="es-CO-SalomeNeural",
@@ -67,8 +94,8 @@ Tu clase `Speech` actual precarga los WAV de `PHRASES` y sigue haciéndolo igual
 En el archivo de la planta agrega:
 
 ```python
-from libraries.arby_tts import ArbyTTS, TTSConfig
-from libraries.plant_speech import PlantSpeech
+from libraries.audio.arby_tts import ArbyTTS, TTSConfig
+from libraries.audio.plant_speech import PlantSpeech
 ```
 
 En `main()`, reemplaza únicamente:
@@ -122,7 +149,7 @@ Pygame y ffplay son clientes de audio diferentes. Aunque no hablen al mismo tiem
 ## 5. Validación
 
 ```powershell
-uv run python -m unittest discover -s RUTA_A_LA_CARPETA_EXTRAIDA -p test_tts.py -v
+uv run python -m unittest libraries.tests.test_tts -v
 ```
 
 Las pruebas no usan el servicio Edge. Incluyen una reproducción real por tubería de un tono MP3 generado en memoria, con salida SDL dummy (sin altavoz). Requieren `ffplay`; la del tono también necesita `ffmpeg`.

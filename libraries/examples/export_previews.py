@@ -1,14 +1,11 @@
 """Export exact-pixel GIF loops and an animated comparison board."""
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
-try:
-    from .arby_eyes import EyeAnimator, STATES
-except ImportError:
-    from arby_eyes import EyeAnimator, STATES
+from libraries.eyes.arby_eyes import EyeAnimator, STATES
 
 
 def main():
-    folder=Path(__file__).resolve().parent.parent/'previews'
+    folder=Path(__file__).resolve().parents[2]/'previews'
     folder.mkdir(exist_ok=True)
     try:
         title=ImageFont.truetype('DejaVuSans.ttf',22)

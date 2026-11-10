@@ -5,10 +5,11 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from libraries.arby_runtime import ArbyRuntime, validate_reply
-from libraries.arby_strip_led import LedStripController, StripConfig
-from libraries.matrix_output import MatrixOutput
+from libraries.core.arby_runtime import ArbyRuntime, validate_reply
+from libraries.leds.arby_strip_led import LedStripController, StripConfig
+from libraries.eyes.matrix_output import MatrixOutput
 import run_arby
+from libraries.simulation.arby_memory_pixels import MemoryPixels
 
 
 PALETTE = {"alegres": (0, 255, 80), "enojado": (255, 0, 0)}
@@ -180,7 +181,7 @@ class RuntimeTests(unittest.TestCase):
             validate_reply(reply)
 
 
-class FakePixels(run_arby._MemoryPixels):
+class FakePixels(MemoryPixels):
     def __init__(self, count):
         super().__init__(count)
         self.shown = 0
@@ -229,21 +230,62 @@ class StripTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def setUp(self):
+        self.env = patch.dict("os.environ", {}, clear=True)
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        self.argv = patch.object(sys, "argv", ["run_arby.py"])
+        self.argv.start()
+        self.addCleanup(self.argv.stop)
+        self.dotenv = patch.object(run_arby, "load_environment")
+        self.dotenv.start()
+        self.addCleanup(self.dotenv.stop)
+
+    def test_typed_environment_settings(self):
+        with patch.dict("os.environ", {"ARBY_BOT_TIMEOUT": "60", "ARBY_STRIP": "true",
+                                      "ARBY_STRIP_LEDS": "82", "ARBY_EYES": "none",
+                                      "GEMINI_MODEL": "test-model"}):
+            config = run_arby.load_config()
+        self.assertEqual(config.bot_timeout, 60)
+        self.assertTrue(config.strip)
+        self.assertEqual(config.strip_leds, 82)
+        self.assertEqual(config.model, "test-model")
+        self.assertEqual(config.eyes, "none")
+
+    def test_invalid_environment_rejected_before_startup(self):
+        for variable, values in {"ARBY_BOT_TIMEOUT": ("0", "-1", "nan", "inf"),
+                                 "ARBY_STRIP": ("maybe",), "ARBY_EYES": ("invalid",),
+                                 "ARBY_STRIP_LEDS": ("abc", "0")}.items():
+            for value in values:
+                with self.subTest(variable=variable, value=value), patch.dict("os.environ", {variable: value}):
+                    with self.assertRaisesRegex(ValueError, variable):
+                        run_arby.load_config()
+                    with patch("builtins.print"):
+                        self.assertEqual(run_arby.main(), 2)
+
+    def test_arguments_rejected(self):
+        with patch.object(sys, "argv", ["run_arby.py", "--eyes", "none"]), patch("builtins.print"):
+            self.assertEqual(run_arby.main(), 2)
+
     def test_offline_console_drains_input_before_eof(self):
-        with patch("builtins.input", side_effect=["enojado", "/frase Test", EOFError]), patch("builtins.print") as printer:
-            code = run_arby.main(["--demo", "--mute", "--eyes", "none"])
+        with patch.dict("os.environ", {"ARBY_DEMO": "true", "ARBY_MUTE": "true", "ARBY_EYES": "none"}):
+            with patch("builtins.input", side_effect=["enojado", "/frase Test", EOFError]), patch("builtins.print") as printer:
+                code = run_arby.main()
         self.assertEqual(code, 0)
         messages = " ".join(str(call) for call in printer.call_args_list)
         self.assertIn("expresión enojado", messages)
         self.assertIn("Arby: Test", messages)
 
     def test_matrix_requires_confirmed_mapping(self):
-        with patch("sys.stderr"), self.assertRaises(SystemExit):
-            run_arby.main(["--demo", "--mute", "--eyes", "matrix"])
+        with patch.dict("os.environ", {"ARBY_EYES": "matrix"}):
+            with self.assertRaisesRegex(ValueError, "ARBY_MULTIPLEXING"):
+                run_arby.load_config()
 
     def test_matrix_rejects_conflicting_strip_gpio(self):
-        with patch("sys.stderr"), self.assertRaises(SystemExit):
-            run_arby.main(["--demo", "--mute", "--eyes", "matrix", "--multiplexing", "1", "--strip", "--strip-gpio", "18"])
+        with patch.dict("os.environ", {"ARBY_EYES": "matrix", "ARBY_MULTIPLEXING": "1",
+                                      "ARBY_STRIP": "true", "ARBY_STRIP_GPIO": "18"}):
+            with self.assertRaisesRegex(ValueError, "ARBY_STRIP_GPIO"):
+                run_arby.load_config()
 
     def test_driver_disables_hardware_pulsing_for_shared_pwm(self):
         from types import SimpleNamespace

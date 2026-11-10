@@ -9,11 +9,11 @@ from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from libraries.arby_response import (
+from libraries.core.arby_response import (
     EMOTION_COLORS, MAX_SEGMENTS, RESPONSE_SCHEMA, make_segment,
     make_reply, normalize_reply, parse_reply,
 )
-from libraries.arby_runtime import ArbyRuntime
+from libraries.core.arby_runtime import ArbyRuntime
 
 
 def sample():
@@ -150,11 +150,11 @@ class BotContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # SDK and retrieval are deliberately stubbed: no API/network/model load.
-        knowledge_module = ModuleType("libraries.arby_knowledge")
+        knowledge_module = ModuleType("libraries.bot.arby_knowledge")
         knowledge_module.KnowledgeStore = Mock()
         knowledge_module.normalize = lambda text: text.casefold().strip()
-        with patch.dict(sys.modules, {"libraries.arby_knowledge": knowledge_module}):
-            cls.module = importlib.import_module("libraries.arby_bot")
+        with patch.dict(sys.modules, {"libraries.bot.arby_knowledge": knowledge_module}):
+            cls.module = importlib.import_module("libraries.bot.arby_bot")
 
     def setUp(self):
         self.knowledge = SimpleNamespace(workers=[], instructions="", candidates=lambda text: [],

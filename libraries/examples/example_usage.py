@@ -1,5 +1,5 @@
 """Text-only example. Replace input/print with STT and TTS in your application."""
-from arby_bot import ArbyBot
+from libraries.bot.arby_bot import ArbyBot
 
 
 def main():

@@ -15,6 +15,10 @@ from typing import Callable
 LOGGER = logging.getLogger(__name__)
 
 
+class _SpeechFailure(RuntimeError):
+    """Local diagnostic without request URLs or spoken text."""
+
+
 @dataclass(frozen=True)
 class TTSConfig:
     voice: str = "es-CO-SalomeNeural"
@@ -195,8 +199,11 @@ class ArbyTTS:
             else:
                 job.status = "failed"
                 # Never include the input text or a raw request URL in the log.
-                job.error = f"{type(error).__name__}: síntesis o reproducción no completada"
-                LOGGER.warning("Arby TTS failed: %s", type(error).__name__)
+                detail = (str(error) if isinstance(error, _SpeechFailure) else
+                          "tiempo de espera de voz agotado" if isinstance(error, TimeoutError) else
+                          "síntesis o reproducción no completada")
+                job.error = f"{type(error).__name__}: {detail}"
+                LOGGER.warning("Arby TTS failed: %s", job.error)
                 LOGGER.debug("Arby TTS diagnostic", exc_info=True)
         finally:
             with self._state:
@@ -229,7 +236,7 @@ class ArbyTTS:
                     raise MemoryError("Prefetched audio exceeds max_prefetch_bytes")
                 data.extend(packet)
             if not data:
-                raise RuntimeError("No prefetched audio received")
+                raise _SpeechFailure("Edge TTS no devolvió audio para el siguiente segmento")
             return data
         finally:
             if hasattr(stream, "aclose"):
@@ -306,7 +313,7 @@ class ArbyTTS:
                 if not data:
                     continue
                 if process.returncode is not None:
-                    raise RuntimeError("ffplay exited before the stream ended.")
+                    raise _SpeechFailure("ffplay terminó antes de recibir todo el audio; revisa la salida de audio y los permisos del usuario")
                 if not received:
                     if job.first_chunk_seconds is None:
                         job.first_chunk_seconds = time.monotonic() - started
@@ -316,7 +323,7 @@ class ArbyTTS:
                 process.stdin.write(data)
                 await process.stdin.drain()
             if not received:
-                raise RuntimeError("No audio received.")
+                raise _SpeechFailure("Edge TTS no devolvió audio")
             process.stdin.close()
             await process.stdin.wait_closed()
             job.status = "finishing"
@@ -324,7 +331,7 @@ class ArbyTTS:
             await stderr_task
             if result != 0:
                 LOGGER.debug("ffplay stderr: %s", diagnostics.decode(errors="replace"))
-                raise RuntimeError(f"ffplay exit code: {result}")
+                raise _SpeechFailure(f"ffplay terminó con código {result}; revisa la salida de audio y los permisos del usuario")
         finally:
             # Kill playback first; then close the stream and diagnostic reader.
             if process and process.returncode is None:

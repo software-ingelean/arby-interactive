@@ -13,11 +13,11 @@ reemplazarlo. Python también puede importar esta carpeta como paquete namespace
 
 | Archivo del ZIP | Destino | Acción |
 | --- | --- | --- |
-| `libraries/arby_eyes.py` | `arby-interactive/libraries/arby_eyes.py` | Reemplazar o agregar; motor de las 12 animaciones |
-| `libraries/demo_eyes.py` | `arby-interactive/libraries/demo_eyes.py` | Reemplazar o agregar; simulador actualizado |
-| `libraries/matrix_output.py` | `arby-interactive/libraries/matrix_output.py` | Copiar si falta; adaptador físico, igual a la entrega anterior |
-| `libraries/export_previews.py` | `arby-interactive/libraries/export_previews.py` | Reemplazar o agregar; herramienta opcional para regenerar GIF |
-| `libraries/test_eyes.py` | `arby-interactive/libraries/test_eyes.py` | Reemplazar o agregar; pruebas sin hardware |
+| `libraries/eyes/arby_eyes.py` | `arby-interactive/libraries/eyes/arby_eyes.py` | Reemplazar o agregar; motor de las 12 animaciones |
+| `libraries/examples/demo_eyes.py` | `arby-interactive/libraries/examples/demo_eyes.py` | Reemplazar o agregar; simulador actualizado |
+| `libraries/eyes/matrix_output.py` | `arby-interactive/libraries/eyes/matrix_output.py` | Copiar si falta; adaptador físico, igual a la entrega anterior |
+| `libraries/examples/export_previews.py` | `arby-interactive/libraries/examples/export_previews.py` | Reemplazar o agregar; herramienta opcional para regenerar GIF |
+| `libraries/tests/test_eyes.py` | `arby-interactive/libraries/tests/test_eyes.py` | Reemplazar o agregar; pruebas sin hardware |
 | `previews/` | `arby-interactive/previews/` | Referencias visuales opcionales |
 
 Los archivos de Gemini, FAISS y TTS no necesitan reemplazo para instalar este motor.
@@ -30,7 +30,7 @@ Desde la raíz de tu proyecto:
 
 ```bash
 uv add pillow pygame
-uv run python -m libraries.demo_eyes --auto
+uv run python -m libraries.examples.demo_eyes --auto
 ```
 
 Esto actualiza `pyproject.toml` y `uv.lock`. En la Raspberry, después de subir esos
@@ -63,8 +63,8 @@ Pygame: únicamente el simulador lo utiliza.
 Ejemplos para iniciar en un estado específico:
 
 ```bash
-uv run python -m libraries.demo_eyes --state cargando
-uv run python -m libraries.demo_eyes --state pensativos
+uv run python -m libraries.examples.demo_eyes --state cargando
+uv run python -m libraries.examples.demo_eyes --state pensativos
 ```
 
 ## Estados y diseño
@@ -94,7 +94,7 @@ mezcla suavemente la forma sonriente al entrar o salir de `alegres`.
 ## Uso en tu aplicación
 
 ```python
-from libraries.arby_eyes import EyeAnimator
+from libraries.eyes.arby_eyes import EyeAnimator
 
 eyes = EyeAnimator()  # default
 eyes.set_state("cargando")
@@ -149,7 +149,7 @@ cian de referencia; el color real se toma del diccionario durante la ejecución.
 Para comprobar un color en la ventana, desde la raíz:
 
 ```bash
-uv run python -m libraries.demo_eyes --state enojado --color 255 0 0
+uv run python -m libraries.examples.demo_eyes --state enojado --color 255 0 0
 ```
 
 `set_state()` vuelve inmediatamente y admite llamadas desde el worker. Repetir
@@ -160,8 +160,8 @@ y a la salida física. Se normalizan tildes, mayúsculas y separadores; por ejem
 ## Salida física
 
 ```python
-from libraries.arby_eyes import EyeAnimator
-from libraries.matrix_output import MatrixOutput
+from libraries.eyes.arby_eyes import EyeAnimator
+from libraries.eyes.matrix_output import MatrixOutput
 
 eyes = EyeAnimator()
 output = MatrixOutput(
@@ -188,8 +188,8 @@ aspecto sobre los LED quedan pendientes de prueba con los paneles físicos.
 ## Verificación y GIF
 
 ```bash
-uv run python -m unittest discover -s libraries -p test_eyes.py -v
-uv run python -m libraries.export_previews
+uv run python -m unittest libraries.tests.test_eyes -v
+uv run python -m libraries.examples.export_previews
 ```
 
 La entrega superó catorce pruebas, incluidas las 144 combinaciones de transición entre

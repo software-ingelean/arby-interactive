@@ -1,5 +1,5 @@
 """Standalone audio test. Run from the folder containing arby_tts.py."""
-from arby_tts import ArbyTTS
+from libraries.audio.arby_tts import ArbyTTS
 
 
 def main():

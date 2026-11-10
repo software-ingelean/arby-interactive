@@ -6,4 +6,4 @@
 - La prueba del servicio remoto Edge con Salomé falló por `ClientConnectorCertificateError` del entorno. No se deshabilitó la validación TLS. No se verificó la escucha de la voz ni la latencia audible.
 - Windows, Raspberry Pi, dispositivo ALSA físico y sensor Trill no se ejecutaron aquí. El adaptador de exclusión se probó con una voz fija simulada que reproduce la interfaz de Speech.
 
-Ejecuta `example_tts.py` en tu equipo para comprobar voz, red y dispositivo antes de integrar la planta. Los errores simulados que aparecen durante unittest son parte de las pruebas.
+Ejecuta `uv run python -m libraries.examples.example_tts` desde la raíz del proyecto en tu equipo para comprobar voz, red y dispositivo antes de integrar la planta. Los errores simulados que aparecen durante unittest son parte de las pruebas.

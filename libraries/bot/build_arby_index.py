@@ -1,7 +1,7 @@
 """Build Arby's FAISS index once, and rebuild after editing the Markdown."""
 import argparse
 from pathlib import Path
-from arby_knowledge import build_index, DEFAULT_EMBEDDING_MODEL
+from libraries.bot.arby_knowledge import build_index, DEFAULT_EMBEDDING_MODEL
 
 
 def main():

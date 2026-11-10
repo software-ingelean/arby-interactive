@@ -87,7 +87,8 @@ Edita `.env` y completa `GEMINI_API_KEY` con tu clave. También puedes usar
 Ejecuta Arby con `uv run python main.py` o `uv run python run_arby.py`.
 Ambas entradas cargan el `.env` de la raíz del proyecto, incluso al ejecutar
 desde otro directorio. Las variables que ya existan en el entorno tienen
-prioridad; `--model` permite elegir el modelo para una ejecución.
+prioridad; `GEMINI_MODEL` permite elegir el modelo. `run_arby.py` y `main.py`
+se configuran exclusivamente desde el entorno; consulta `.env.example`.
 
 `.env` está excluido de Git: guarda ahí las claves locales. `.env.example`
 documenta las variables sin incluir secretos. Los archivos de `config/*.json`

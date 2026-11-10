@@ -1,6 +1,6 @@
-"""Place at your project root; put the new modules inside libraries/."""
-from libraries.arby_bot import ArbyBot, BotConfig
-from libraries.arby_tts import ArbyTTS
+"""Run from the project root with python -m libraries.examples.example_arby_voice."""
+from libraries.bot.arby_bot import ArbyBot, BotConfig
+from libraries.audio.arby_tts import ArbyTTS
 
 
 def main():

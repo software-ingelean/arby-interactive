@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import math
 import time
 
-from .control_tira_led import expansion
+from libraries.leds.control_tira_led import expansion
 
 
 @dataclass(frozen=True)

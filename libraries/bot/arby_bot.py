@@ -10,9 +10,9 @@ from pathlib import Path
 import re
 from threading import RLock
 
-from libraries.arby_env import load_environment
-from libraries.arby_knowledge import KnowledgeStore, normalize
-from libraries.arby_response import (
+from libraries.core.arby_env import load_environment
+from libraries.bot.arby_knowledge import KnowledgeStore, normalize
+from libraries.core.arby_response import (
     EMOTION_COLORS, MATRIX_STATES, RESPONSE_SCHEMA, clean_for_speech,
     make_reply, make_segment, normalize_reply, parse_reply,
 )

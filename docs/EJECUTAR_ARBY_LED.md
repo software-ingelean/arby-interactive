@@ -1,20 +1,15 @@
 # Ejecutar Arby con la tira LED
 
-No necesitas instalar Arby en el Python global. Usa el mismo entorno `.venv`
-para el bot y para la tira; los permisos de acceso al hardware son un asunto
-distinto del entorno Python. Para la salida NeoPixel por GPIO12, normalmente
-debes ejecutar con `sudo`, indicando el Python de `.venv` explícitamente.
+Arby se configura exclusivamente mediante variables de entorno. Edita `.env`
+en la raíz del proyecto; `run_arby.py` y `main.py` se ejecutan sin argumentos.
+Las variables exportadas por el proceso tienen prioridad sobre `.env`; los
+valores vacíos conservan los predeterminados. `sudo` puede eliminar variables
+exportadas, pero el script sigue leyendo `.env` desde la raíz del proyecto.
 
-Esta guía corresponde al controlador actual: `board` + `neopixel`, 55 LED RGB
-en orden GRB y datos en **GPIO BCM12** (pin físico 32). Está orientada a
-Raspberry Pi con un backend PWM compatible; no presupone compatibilidad con
-Raspberry Pi 5. Si usas ese modelo, hay que verificar el backend y el cableado
-antes de seguir estos pasos.
+## Instalación en la Raspberry
 
-## 1. Instalar en la Raspberry Pi
-
-Abre una terminal en la raíz del repositorio (la carpeta de `run_arby.py`).
-Ejecuta la instalación como tu usuario habitual:
+No necesitas Python global. Usa `.venv` para el bot y la tira; los permisos de
+GPIO son independientes del entorno Python. Desde la raíz del repositorio:
 
 ```bash
 sudo apt update
@@ -22,52 +17,30 @@ sudo apt install ffmpeg
 uv sync --extra led
 ```
 
-Las dependencias de hardware están declaradas en el extra `led` de
-`pyproject.toml`, incluidas `gpiod` y `Adafruit-Blinka-Raspberry-Pi-PWM`.
-Usa siempre `uv sync --extra led` al sincronizar esta Raspberry; `uv sync`
-sin el extra puede quitar estos paquetes. Si ejecutas mediante `uv run`, usa
-también `uv run --extra led`. Los comandos de esta guía usan directamente
-`.venv/bin/python`; no hace falta activar el entorno ni instalar `pip`.
+Usa `--extra led` en futuras sincronizaciones para conservar los paquetes de
+hardware. Si ejecutas mediante uv, usa `uv run --extra led python run_arby.py`.
+No uses `sudo uv run` ni `sudo pip install`.
 
-Comprueba que las dependencias están en el Python correcto:
+Esta guía corresponde al backend `board` + `neopixel`, LED RGB en orden GRB,
+y datos en GPIO BCM12 (pin físico 32). Confirma la compatibilidad del backend
+con tu modelo de Raspberry y sistema operativo. Conecta con la alimentación
+apagada, usa una fuente de 5 V adecuada y masa común. No alimentes la tira
+desde un GPIO.
 
-```bash
-.venv/bin/python -c 'import sys, board, neopixel, rpi_ws281x; print(sys.executable); print("Dependencias LED disponibles")'
-```
+## Configuración normal
 
-Este comando comprueba las importaciones; todavía no prueba el acceso a la tira.
-No uses `sudo pip install` ni `--break-system-packages`.
-
-## 2. Probar solo la integración y la tira
-
-Conecta la tira con la Raspberry apagada. Usa una fuente de 5 V adecuada para
-la tira y masa común con la Raspberry; conecta los datos a DIN. No alimentes
-los 55 LED desde un GPIO.
-
-Desde la raíz del proyecto:
+Si todavía no tienes `.env`, créalo sin sobrescribir uno existente:
 
 ```bash
-sudo "$(pwd)/.venv/bin/python" "$(pwd)/run_arby.py" --eyes none --strip --demo --mute --strip-gpio 12 --strip-leds 55 --strip-brightness 20
+test -f .env || cp .env.example .env
 ```
 
-Esta prueba no usa Gemini, el índice FAISS ni el audio. Escribe `alegres`,
-`pensativos` o `emociones` y pulsa Enter para probar cambios de expresión y
-color. Escribe `salir` para cerrar y apagar la tira. También puedes usar Ctrl+C.
-
-Sin una Raspberry o sin tira, puedes comprobar el arranque simulado:
-
-```bash
-.venv/bin/python run_arby.py --eyes none --demo --mute
-```
-
-## 3. Ejecutar el bot con voz y la tira
-
-### Guardar las opciones en `.env`
-
-Agrega estas líneas a tu `.env` existente, conservando la clave de API:
+Conserva tu clave y agrega o ajusta estas variables:
 
 ```dotenv
+GEMINI_API_KEY=tu_clave
 GEMINI_MODEL=gemini-flash-latest
+ARBY_BOT_TIMEOUT=60
 ARBY_EYES=none
 ARBY_STRIP=true
 ARBY_STRIP_GPIO=12
@@ -78,69 +51,64 @@ ARBY_DEMO=false
 ARBY_MUTE=false
 ```
 
-Con este perfil basta con ejecutar, desde la raíz:
+También puedes usar `GOOGLE_API_KEY`. La ejecución real requiere el índice y la
+configuración del bot descritos en [la guía de integración](../README_integracion.md).
+Ejecuta siempre desde la raíz con el mismo comando:
 
 ```bash
 sudo "$(pwd)/.venv/bin/python" "$(pwd)/run_arby.py"
 ```
 
-Cada opción de consola tiene una variable `ARBY_` con el nombre en mayúsculas
-y guiones convertidos a guiones bajos: por ejemplo, `--audio-device` corresponde
-a `ARBY_AUDIO_DEVICE`. La excepción es `--model`, que usa `GEMINI_MODEL`.
-Consulta todas las variables en [`.env.example`](../.env.example) o con `--help`.
-Un valor vacío conserva el valor predeterminado. Los booleanos aceptan
-`true/false`, `1/0`, `yes/no` y `on/off`.
+Para un equipo sin hardware, usa `.venv/bin/python run_arby.py` sin `sudo`.
+`main.py` también lee las mismas variables. Los argumentos antiguos se rechazan
+con un aviso antes de inicializar hardware o servicios.
 
-Los argumentos explícitos tienen prioridad sobre el entorno. Puedes usar
-`--no-strip`, `--no-demo`, `--no-mute` y `--no-swap-eyes` para desactivar
-opciones activadas en `.env`. Para probar sin hardware ni servicios externos:
+## Perfiles de prueba
 
-```bash
-.venv/bin/python run_arby.py --eyes none --no-strip --demo --mute
-```
+Modifica estas variables en `.env` y reinicia el programa tras cada cambio:
 
-Las variables exportadas por el proceso tienen prioridad sobre `.env`.
-`sudo` puede eliminar esas variables, pero Arby sigue leyendo el archivo `.env`.
+| Prueba | ARBY_EYES | ARBY_STRIP | ARBY_DEMO | ARBY_MUTE |
+| --- | --- | --- | --- | --- |
+| Tira sin Gemini ni voz | none | true | true | true |
+| Simulación sin hardware ni servicios | none | false | true | true |
+| Voz sin Gemini ni hardware (ejecutar sin sudo) | none | false | true | false |
+| Gemini sin voz ni hardware | none | false | false | true |
+| Bot completo con tira | none | true | false | false |
 
-### Configuración de la API
+Escribe `alegres`, `pensativos` o `emociones` en modo demo. Para probar la voz,
+escribe `/frase Hola, esta es una prueba de voz`. `salir` o Ctrl+C cierra y apaga
+la tira. Con escritorio puedes elegir `ARBY_EYES=preview`; las matrices físicas
+usan `ARBY_EYES=matrix` y requieren `ARBY_MULTIPLEXING` validado, además de
+`rgbmatrix`. Consulta la guía de integración antes de activarlas.
 
-Si todavía no tienes `.env`, créalo sin sobrescribir uno existente:
+## Variables adicionales
 
-```bash
-test -f .env || cp .env.example .env
-```
+Consulta todas las variables en [`.env.example`](../.env.example).
+Los booleanos aceptan `true/false`, `1/0`, `yes/no` y `on/off`.
 
-Edita `.env` y configura `GEMINI_API_KEY` (o `GOOGLE_API_KEY`). El script carga
-este archivo desde la raíz del proyecto incluso al ejecutarse con `sudo`.
-La ejecución real también necesita el índice y la configuración del bot
-descritos en [la guía de integración](../README_integracion.md).
-
-```bash
-sudo "$(pwd)/.venv/bin/python" "$(pwd)/run_arby.py" --eyes none --strip
-```
-
-Si exportaste la clave en la terminal en lugar de usar `.env`:
-
-```bash
-sudo --preserve-env=GEMINI_API_KEY,GOOGLE_API_KEY,GEMINI_MODEL "$(pwd)/.venv/bin/python" "$(pwd)/run_arby.py" --eyes none --strip
-```
-
-No uses `sudo python3` ni `sudo uv run`: podrían seleccionar un entorno distinto.
-Con escritorio, puedes sustituir `--eyes none` por `--eyes preview`; la ventana
-requiere acceso a la sesión gráfica del usuario. Por SSH, usa `--eyes none`.
-Las matrices físicas requieren además `rgbmatrix` y un valor de
-`--multiplexing` validado: consulta la guía de integración antes de activarlas.
+| Variables | Uso |
+| --- | --- |
+| ARBY_VOICE, ARBY_RATE, ARBY_PITCH | Voz Edge TTS, velocidad y tono; por ejemplo `+12%` y `+0Hz`. |
+| ARBY_FFPLAY | Nombre o ruta del reproductor ffplay. |
+| ARBY_AUDIO_DRIVER, ARBY_AUDIO_DEVICE | Salida de audio disponible para el usuario que ejecuta Arby. |
+| ARBY_MULTIPLEXING, ARBY_ROW_ADDRESS_TYPE | Configuración comprobada de los paneles físicos. |
+| ARBY_MATRIX_BRIGHTNESS, ARBY_SLOWDOWN, ARBY_SWAP_EYES | Brillo, temporización e intercambio de ojos. |
+| ARBY_STRIP_EFFECT | solid, breathing, bounce, center_out o ripple. |
 
 ## Problemas frecuentes
 
-| Mensaje o síntoma | Qué revisar |
-| --- | --- |
-| `No module named board`, `neopixel` o `rpi_ws281x` | Repite la instalación de hardware en `.venv` y usa ese mismo Python con `sudo`. |
-| `Operation not permitted`, `mailbox` o acceso a `/dev/mem` | Ejecuta la prueba LED con `sudo` y la ruta explícita al Python del entorno. Si persiste, revisa compatibilidad del modelo de Raspberry, sistema operativo y backend. |
-| Error de plataforma o placa no compatible | Confirma el modelo de Raspberry y el soporte de Blinka/rpi_ws281x; elevar permisos no resuelve una incompatibilidad de hardware. |
-| Error de pantalla | Usa `--eyes none` si no hay sesión gráfica disponible. |
-| La tira funciona pero no se escucha la voz | Prueba primero sin `--strip` y sin `sudo`. Root puede no acceder a la sesión PulseAudio/PipeWire; configura una salida ALSA disponible mediante `--audio-driver` y `--audio-device`. |
-| Falla Gemini o FAISS | Repite con `--demo --mute` para comprobar la tira por separado y revisa la configuración del bot. |
+- Si falta `board`, `neopixel`, `gpiod` o `rpi_ws281x`, repite `uv sync --extra led`
+  y ejecuta con el Python de `.venv`.
+- Si aparece `Operation not permitted`, `mailbox` o acceso a `/dev/mem`, usa
+  `sudo` con la ruta explícita al Python. Si persiste, revisa la compatibilidad
+  del backend con la placa y el sistema operativo.
+- Ante HTTP 504, prueba `ARBY_BOT_TIMEOUT=60`. Son segundos por intento y hay
+  hasta tres intentos. Aumentarlo prolonga la espera y no garantiza resolver
+  una demora del servidor.
+- Si falla la voz, usa el perfil de voz sin hardware y sin `sudo`. Si funciona,
+  repite con `sudo`: un fallo exclusivo de root apunta al acceso a la salida de
+  audio. Ajusta `ARBY_AUDIO_DRIVER` y `ARBY_AUDIO_DEVICE` según tu dispositivo.
+- Para separar fallos de Gemini/FAISS de los del hardware, usa el perfil de tira
+  sin Gemini ni voz.
 
-Referencia: [guía oficial de Adafruit para NeoPixel en Raspberry Pi](https://learn.adafruit.com/neopixels-on-raspberry-pi/python-usage),
-que documenta el entorno virtual y la ejecución con permisos de root.
+Referencia: [guía oficial de Adafruit](https://learn.adafruit.com/neopixels-on-raspberry-pi/python-usage).

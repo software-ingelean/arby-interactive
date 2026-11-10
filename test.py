@@ -1,5 +1,5 @@
-from libraries.arby_bot import ArbyBot, BotConfig
-from libraries.arby_tts import ArbyTTS, TTSConfig
+from libraries.bot.arby_bot import ArbyBot, BotConfig
+from libraries.audio.arby_tts import ArbyTTS, TTSConfig
 
 
 

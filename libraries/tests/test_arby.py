@@ -6,10 +6,10 @@ import unittest
 from unittest.mock import Mock
 import numpy as np
 
-from arby_bot import ArbyBot, BotConfig, clean_for_speech
-from arby_knowledge import KnowledgeStore, build_index, normalize, parse_context
+from libraries.bot.arby_bot import ArbyBot, BotConfig, clean_for_speech
+from libraries.bot.arby_knowledge import KnowledgeStore, build_index, normalize, parse_context
 
-CONTEXT = Path(__file__).resolve().parent / "contexto_arby.md"
+CONTEXT = Path(__file__).resolve().parents[1] / "bot" / "contexto_arby.md"
 
 
 class FakeTokenizer:

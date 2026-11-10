@@ -6,8 +6,8 @@ import subprocess
 import threading
 import unittest
 
-from arby_tts import ArbyTTS, TTSConfig
-from plant_speech import PlantSpeech
+from libraries.audio.arby_tts import ArbyTTS, TTSConfig
+from libraries.audio.plant_speech import PlantSpeech
 
 
 class QuietTTS(ArbyTTS):

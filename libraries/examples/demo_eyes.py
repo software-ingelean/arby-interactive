@@ -2,10 +2,7 @@
 import argparse
 import time
 
-try:
-    from .arby_eyes import EyeAnimator, STATES
-except ImportError:
-    from arby_eyes import EyeAnimator, STATES
+from libraries.eyes.arby_eyes import EyeAnimator, STATES
 
 
 def main():
@@ -29,10 +26,7 @@ def main():
     if args.backend=='matrix':
         if args.multiplexing is None:
             parser.error('No se ha validado el multiplexado. Especifica --multiplexing cuando tengas los paneles.')
-        try:
-            from .matrix_output import MatrixOutput
-        except ImportError:
-            from matrix_output import MatrixOutput
+        from libraries.eyes.matrix_output import MatrixOutput
         output=MatrixOutput(multiplexing=args.multiplexing,slowdown=args.slowdown,
                             brightness=args.brightness,row_address_type=args.row_address_type,
                             swap_eyes=args.swap_eyes)

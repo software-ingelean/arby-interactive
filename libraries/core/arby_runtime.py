@@ -6,8 +6,8 @@ from queue import Queue, Empty, Full
 import threading
 import time
 
-from .arby_eyes import EMOTION_STATES, normalize_state
-from .arby_response import normalize_reply, validate_color
+from libraries.eyes.arby_eyes import EMOTION_STATES, normalize_state
+from libraries.core.arby_response import normalize_reply, validate_color
 
 LOGGER = logging.getLogger(__name__)
 IDLE_COLOR = (40, 215, 255)
