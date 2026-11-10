@@ -52,6 +52,10 @@ necesitas reconstruir el índice FAISS, porque las reglas cambian en el prompt d
 
 ## Dependencias
 
+Para instalar y ejecutar `run_arby.py` con GPIO12 paso a paso, consulta la
+[guía de ejecución con LED](docs/EJECUTAR_ARBY_LED.md). No necesitas un Python
+global: puedes ejecutar el Python de `.venv` con permisos de administrador.
+
 Desde la raíz, si no están todavía declaradas:
 
 ```bash
@@ -63,14 +67,14 @@ mismo entorno que ejecuta Arby. Si ya funcionaba allí con ese entorno, conserva
 esa instalación. Si faltan, agrégalas desde la Raspberry:
 
 ```bash
-uv add adafruit-blinka adafruit-circuitpython-neopixel
+uv sync --extra led
 ```
 
 Mantén también las dependencias actuales del bot y `edge-tts`. `ffplay` debe estar
 instalado en el sistema o indicado con `--ffplay RUTA`. Después de versionar los
-cambios de `pyproject.toml` y `uv.lock`, en la Raspberry haz pull y `uv sync`.
-No se incluye un nuevo `pyproject.toml` para evitar cambiar tu resolución de
-PyTorch y las otras dependencias del proyecto.
+cambios de `pyproject.toml` y `uv.lock`, en la Raspberry haz pull y
+`uv sync --extra led`. Conserva `--extra led` en futuras sincronizaciones o
+ejecuciones mediante `uv run --extra led` para mantener los paquetes de hardware.
 
 ## Primera ejecución con Gemini y voz
 

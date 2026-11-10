@@ -69,6 +69,11 @@ versiones antiguas o si configuras `"voice_engine": "espeak"`.
 
 ## Ejecución
 
+Para `run_arby.py` con la tira física, consulta la
+[guía de ejecución con LED](docs/EJECUTAR_ARBY_LED.md). Usa `.venv` también
+para NeoPixel y, cuando el backend lo requiera, `sudo` con la ruta explícita
+al Python de ese entorno.
+
 ### Variables de entorno de Arby
 
 Después de `uv sync`, copia `.env.example` a `.env` si aún no existe:

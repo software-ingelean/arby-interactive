@@ -130,7 +130,7 @@ class _Preview:
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--eyes", choices=("preview", "none", "matrix"), default="preview")
-    parser.add_argument("--strip", action="store_true", help="Enable the physical NeoPixel strip")
+    parser.add_argument("--strip", action=argparse.BooleanOptionalAction, default=False, help="Enable the physical NeoPixel strip")
     parser.add_argument("--strip-gpio", type=int, default=12)
     parser.add_argument("--strip-leds", type=int, default=55)
     parser.add_argument("--strip-brightness", type=int, default=20)
@@ -139,7 +139,7 @@ def build_parser():
     parser.add_argument("--row-address-type", type=int, default=0)
     parser.add_argument("--matrix-brightness", type=int, default=25)
     parser.add_argument("--slowdown", type=int, default=2)
-    parser.add_argument("--swap-eyes", action="store_true")
+    parser.add_argument("--swap-eyes", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--model", default=None, help="Use the existing bot default unless provided")
     parser.add_argument("--voice", default=None)
     parser.add_argument("--rate", default=None, help="For example: --rate=+12%%")
@@ -147,8 +147,30 @@ def build_parser():
     parser.add_argument("--ffplay", default=None)
     parser.add_argument("--audio-driver", default=None)
     parser.add_argument("--audio-device", default=None)
-    parser.add_argument("--mute", action="store_true", help="Skip TTS for integration tests")
-    parser.add_argument("--demo", action="store_true", help="Offline fake bot; bypass Gemini and FAISS")
+    parser.add_argument("--mute", action=argparse.BooleanOptionalAction, default=False, help="Skip TTS for integration tests")
+    parser.add_argument("--demo", action=argparse.BooleanOptionalAction, default=False, help="Offline fake bot; bypass Gemini and FAISS")
+    # main() loads .env before building defaults; explicit CLI values win.
+    for action in parser._actions:
+        if action.dest == "help":
+            continue
+        variable = "GEMINI_MODEL" if action.dest == "model" else f"ARBY_{action.dest.upper()}"
+        action.help = (action.help or "") + f" (env: {variable})"
+        raw = os.getenv(variable)
+        if raw is None or not raw.strip():
+            continue
+        raw = raw.strip()
+        try:
+            if isinstance(action, argparse.BooleanOptionalAction):
+                if raw.casefold() not in {"true", "false", "1", "0", "yes", "no", "on", "off"}:
+                    raise ValueError("usa true/false, 1/0, yes/no u on/off")
+                value = raw.casefold() in {"true", "1", "yes", "on"}
+            else:
+                value = action.type(raw) if action.type else raw
+            if action.choices is not None and value not in action.choices:
+                raise ValueError(f"opciones: {', '.join(map(str, action.choices))}")
+        except ValueError as exc:
+            parser.error(f"{variable}: {exc}")
+        action.default = value
     return parser
 
 
