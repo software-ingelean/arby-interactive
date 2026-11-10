@@ -340,11 +340,14 @@ si termina después del cierre, su resultado se descarta y no se reproduce.
 ## Respuestas automáticas con Trill Craft
 
 Activa `ARBY_TRILL=true` en `.env` y ejecuta `.venv/bin/python run_arby.py`
-(o `main.py`). Este modo escucha el sensor continuamente hasta Ctrl+C, sin
-consola ni Gemini; no requiere clave de API. Conserva la voz TTS, ojos y tira
+(o `main.py`). El sensor se escucha en paralelo a la conversación por consola.
+La conversación sigue usando Gemini; los toques usan frases automáticas sin
+consultar Gemini ni modificar el historial. Conserva la voz TTS, ojos y tira
 configurados para Arby. Para ejecutarlo sin ventana usa `ARBY_EYES=none`;
 la integración del sensor no importa el script de prueba ni pygame.
-`ARBY_TRILL=false` conserva el modo de conversación por consola.
+`ARBY_TRILL=false` desactiva únicamente el sensor. Para probar sin Gemini,
+usa `ARBY_DEMO=true`. Sal con `salir` o Ctrl+C; si la consola recibe EOF,
+el sensor sigue activo hasta Ctrl+C.
 
 Se reutiliza `config/triki_config.json`: bus I2C 1, dirección `0x30`, modo
 DIFF, prescaler, umbral de ruido, umbrales de toque/liberación, intervalo de
@@ -357,7 +360,11 @@ el usuario que ejecuta Arby; `smbus2` ya está declarado como dependencia.
 Las frases y emociones están en `libraries/core/arby_touch.py`. Se confirma
 cada toque con dos lecturas y se detectan toques sostenidos y cuatro toques
 en diez segundos. Los canales sin zona se ignoran. Los eventos durante una
-respuesta o durante `speech_cooldown_seconds` se descartan, sin acumular voz.
+respuesta, una consulta a Gemini o durante `speech_cooldown_seconds` se
+descartan, sin acumular voz. Si escribes durante una reacción al toque,
+la conversación se encola y continúa al terminar esa reacción. La lectura
+del sensor, la consola y las animaciones continúan mientras trabaja el bot;
+la voz y las expresiones se coordinan mediante una sola cola de respuestas.
 Las opciones de audio y pantalla del antiguo JSON no se utilizan: voz y
 salidas se configuran con las variables `ARBY_*` de `.env`.
 Un error de lectura I2C detiene la aplicación y libera sus recursos.

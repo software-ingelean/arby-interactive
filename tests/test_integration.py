@@ -276,6 +276,29 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("expresión enojado", messages)
         self.assertIn("Arby: Test", messages)
 
+    def test_trill_and_console_run_together(self):
+        from unittest.mock import Mock
+        sensor = Mock()
+        reactions = Mock()
+        with patch.dict("os.environ", {"ARBY_TRILL": "true", "ARBY_DEMO": "true",
+                                      "ARBY_MUTE": "true", "ARBY_EYES": "none"}), \
+                patch("libraries.core.arby_touch.TrillReader", return_value=sensor), \
+                patch("libraries.core.arby_touch.TouchReactions", return_value=reactions), \
+                patch("builtins.input", side_effect=["enojado", "salir"]), \
+                patch("builtins.print") as printer:
+            self.assertEqual(run_arby.main(), 0)
+        self.assertIn("expresión enojado", " ".join(str(c) for c in printer.call_args_list))
+        reactions.update.assert_called()
+        sensor.close.assert_called_once()
+
+    def test_trill_does_not_replace_gemini_with_demo(self):
+        from unittest.mock import Mock
+        with patch.dict("os.environ", {"ARBY_TRILL": "true", "ARBY_EYES": "none"}), \
+                patch("libraries.core.arby_touch.TrillReader", return_value=Mock()), \
+                patch("builtins.print") as printer:
+            self.assertEqual(run_arby.main(), 1)
+        self.assertIn("Configura GEMINI_API_KEY", " ".join(str(c) for c in printer.call_args_list))
+
     def test_console_waits_for_playback_and_prints_before_next_prompt(self):
         bot, tts = FakeBot(), FakeTTS()
         tts.finished.clear()

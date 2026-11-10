@@ -184,7 +184,7 @@ def main():
             elif args.eyes == "preview":
                 preview = Preview(args.strip_leds)
                 stack.callback(preview.close)
-            if args.demo or args.trill:
+            if args.demo:
                 bot = DemoBot()
                 palette = bot.colors
             else:
@@ -217,11 +217,10 @@ def main():
             stack.callback(runtime.close)
             eyes = EyeAnimator()
             if touch:
-                print("Estado: Trill activo; respuestas automáticas. Ctrl+C para salir.", flush=True)
-            else:
-                reader = threading.Thread(target=_console, args=(runtime, stop, input_done),
-                                          name="arby-console", daemon=True)
-                reader.start()
+                print("Estado: Trill activo junto a la conversación; toques con respuestas automáticas.", flush=True)
+            reader = threading.Thread(target=_console, args=(runtime, stop, input_done),
+                                      name="arby-console", daemon=True)
+            reader.start()
             revision = -1
             while not stop.is_set():
                 started = time.monotonic()
@@ -243,7 +242,7 @@ def main():
                     if preview:
                         preview.show(frame, visual, strip.pixels, physical_strip=args.strip)
                 _print_events(runtime)
-                if input_done.is_set() and runtime.pending_count == 0:
+                if not touch and input_done.is_set() and runtime.pending_count == 0:
                     break
                 stop.wait(max(0, 1/30 - (time.monotonic() - started)))
             _print_events(runtime)
