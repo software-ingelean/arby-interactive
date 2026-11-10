@@ -1,9 +1,17 @@
 # Validación de Arby TTS
 
-- 10 pruebas automáticas: entrada vacía/tipos/límites, estado ocupado, cancelación, interrupción y cierre, error de síntesis, timeout, llamadas concurrentes, ausencia de audio, exclusión con voz fija y reproducción por tubería.
-- FFmpeg generó un tono MP3 en memoria, enviado en fragmentos a un proceso real de ffplay. La decodificación y reproducción terminaron con salida SDL dummy, sin altavoz ni archivos de audio.
-- Cancelación comprobada con un proceso real de ffplay esperando audio; el proceso se termina y la operación queda cancelada.
-- La prueba del servicio remoto Edge con Salomé falló por `ClientConnectorCertificateError` del entorno. No se deshabilitó la validación TLS. No se verificó la escucha de la voz ni la latencia audible.
-- Windows, Raspberry Pi, dispositivo ALSA físico y sensor Trill no se ejecutaron aquí. El adaptador de exclusión se probó con una voz fija simulada que reproduce la interfaz de Speech.
+Las pruebas actuales cubren síntesis antes de abrir el reproductor, reproducción
+real de MP3 mono con `ffplay` y salida SDL dummy, cancelación durante la síntesis,
+cierre repetido con un proceso activo, borrado del audio temporal al cancelar y
+diagnóstico del dispositivo cuando falla el reproductor. También cubren estado
+ocupado, límites de texto, errores, timeout y coordinación con la voz fija.
 
-Ejecuta `uv run python -m libraries.examples.example_tts` desde la raíz del proyecto en tu equipo para comprobar voz, red y dispositivo antes de integrar la planta. Los errores simulados que aparecen durante unittest son parte de las pruebas.
+Ejecuta desde la raíz:
+
+```bash
+.venv/bin/python -m unittest libraries.tests.test_tts libraries.tests.test_audio_recovery -v
+```
+
+Los errores simulados que aparecen en los logs son parte de las pruebas.
+La tarjeta USB de la Raspberry y la escucha de la voz deben verificarse en el
+equipo: la salida dummy solo valida la decodificación y el cierre del reproductor.

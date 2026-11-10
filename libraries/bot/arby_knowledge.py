@@ -149,12 +149,12 @@ class KnowledgeStore:
         self.instructions, _, self.workers = parse_context(Path(context_path))
         manifest_path = self.path / "manifest.json"
         if not manifest_path.exists():
-            raise FileNotFoundError("Falta el índice. Ejecuta: python build_arby_index.py")
+            raise FileNotFoundError("Falta el índice. Ejecuta: uv run --extra led python -m libraries.bot.build_arby_index")
         meta = json.loads(manifest_path.read_text(encoding="utf-8"))
         if meta.get("format_version") != 1:
             raise ValueError("Formato de índice incompatible; reconstruye el índice.")
         if meta["source_sha256"] != source_hash(Path(context_path)):
-            raise ValueError("El contexto cambió. Ejecuta: python build_arby_index.py")
+            raise ValueError("El contexto cambió. Ejecuta: uv run --extra led python -m libraries.bot.build_arby_index")
         files = []
         for key in ("index", "data"):
             name = meta[f"{key}_file"]

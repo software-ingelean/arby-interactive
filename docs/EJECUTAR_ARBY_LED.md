@@ -112,3 +112,62 @@ Los booleanos aceptan `true/false`, `1/0`, `yes/no` y `on/off`.
   sin Gemini ni voz.
 
 Referencia: [guía oficial de Adafruit](https://learn.adafruit.com/neopixels-on-raspberry-pi/python-usage).
+
+## Jack analógico y tira en GPIO12
+
+Con el backend PWM de `rpi_ws281x`, la tira en GPIO12 y el audio analógico
+`bcm2835 Headphones` comparten PWM. Seleccionar otra tarjeta en `.env` no
+resuelve esa colisión. Puede fallar la reproducción o aparecer un pitido.
+Referencia: [limitaciones oficiales de rpi_ws281x](https://github.com/jgarff/rpi_ws281x#limitations).
+
+Para aislarlo, cierra Arby y reinícialo con un perfil temporal sin tira ni matrices:
+
+```bash
+sudo env ARBY_STRIP=false ARBY_EYES=none ARBY_DEMO=true ARBY_MUTE=false \
+  ARBY_AUDIO_DRIVER=alsa ARBY_AUDIO_DEVICE=plughw:CARD=Headphones,DEV=0 \
+  "$(pwd)/.venv/bin/python" "$(pwd)/run_arby.py"
+```
+
+Escribe `/frase Prueba de audio`. Las variables de este comando tienen prioridad
+sobre `.env` y no modifican el archivo. Si funciona, usa audio USB/HDMI o adapta
+el control LED a un periférico compatible antes de volver a usar ambos juntos.
+
+## Cierre y diagnóstico de voz
+
+`salir`, Ctrl+C, SIGTERM y SIGHUP solicitan el cierre de recursos. Arby cancela
+la síntesis, cierra la entrada del reproductor y termina su propio `ffplay`,
+escalando a kill si no responde. No termina reproductores externos ni las
+pruebas `speaker-test` que se hayan iniciado por separado. SIGKILL o una pérdida
+de alimentación no permiten ejecutar la limpieza de Python.
+
+Los fallos de voz muestran el driver, el dispositivo y el diagnóstico de
+`ffplay`; incluye esa información al reportar problemas.
+
+### Prueba experimental de recuperación del jack al cerrar
+
+Esta opción está desactivada por defecto. Después de cerrar la voz, las matrices
+si las hay, y liberar correctamente la tira con `deinit()`, intenta abrir y cerrar
+el jack mediante un cuarto de segundo de silencio PCM con `aplay`. El comando
+se limita a tres segundos; si falta `aplay` o falla el dispositivo, avisa y no
+impide terminar. No cambia el mezclador, descarga módulos ni reinicia servicios.
+
+Para activarla en `.env`:
+
+```dotenv
+ARBY_AUDIO_DRIVER=alsa
+ARBY_AUDIO_DEVICE=plughw:CARD=Headphones,DEV=0
+ARBY_AUDIO_RECOVER_ON_EXIT=true
+```
+
+Requiere `aplay` del paquete `alsa-utils`. La recuperación solo se ejecuta si
+`ARBY_STRIP=true`; también se intenta ante un fallo posterior del arranque si
+la tira ya fue creada y se libera correctamente. No se abre el jack si falla
+la liberación de la tira. Si la inicialización de la propia tira falla antes
+de devolver su controlador, solo se aplica su limpieza interna.
+
+Ejecuta `sudo "$(pwd)/.venv/bin/python" "$(pwd)/run_arby.py"`, espera a que arranque
+y termina con Ctrl+C. Compara si queda el pitido con esta opción activada y con
+`ARBY_AUDIO_RECOVER_ON_EXIT=false`. El mensaje de finalización confirma únicamente
+que ALSA aceptó el silencio; no puede verificar que el pitido haya desaparecido.
+Este experimento no soluciona el conflicto de PWM mientras tira y jack funcionan
+a la vez. Para deshacerlo, vuelve a poner la opción en `false`.

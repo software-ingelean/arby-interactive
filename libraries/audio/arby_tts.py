@@ -1,4 +1,4 @@
-"""Edge TTS streaming to ffplay stdin. No temporary audio files."""
+"""Edge TTS with complete MP3 playback and owned-player cleanup."""
 from __future__ import annotations
 
 import asyncio
@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import threading
+from tempfile import TemporaryDirectory
 import time
 from typing import Callable
 
@@ -52,6 +53,7 @@ class _Job:
     total_seconds: float | None = None
     segments: tuple[str, ...] | None = None
     on_segment: Callable[[int], None] | None = None
+    process: asyncio.subprocess.Process | None = None
 
 
 class ArbyTTS:
@@ -114,9 +116,9 @@ class ArbyTTS:
         return self._start_job(text, interrupt=interrupt)
 
     def speak_segments(self, texts, *, on_segment=None, interrupt=False):
-        """Stream the first phrase and prefetch one next phrase in RAM.
+        """Synthesize each phrase and prefetch one next phrase in RAM.
 
-        on_segment(index) runs on the TTS worker when audio first enters ffplay
+        on_segment(index) runs on the TTS worker when its player starts
         for that phrase; callbacks must be short and thread-safe, never draw UI.
         wait/stop/is_speaking cover the whole sequence, not an individual phrase.
         """
@@ -165,14 +167,26 @@ class ArbyTTS:
                 job = self._job
                 if job is None or job.done.is_set():
                     return True
+                first_cancel = not job.cancelled.is_set()
                 job.cancelled.set()
                 loop, task = job.loop, job.task
-            if loop and task:
+            # Repeated close/stop calls must not cancel the cleanup itself.
+            if first_cancel and loop and task:
                 try:
                     loop.call_soon_threadsafe(task.cancel)
                 except RuntimeError:
                     pass  # The worker has already closed its event loop.
-            return job.done.wait(timeout)
+            if job.done.wait(timeout):
+                return True
+            # A stuck network stream must not leave an owned player sounding.
+            with self._state:
+                process = job.process
+            if process and process.returncode is None:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+            return job.done.wait(1.0)
 
     def close(self):
         with self._control:
@@ -220,11 +234,22 @@ class ArbyTTS:
             raise asyncio.CancelledError
         operation = (self._play_segments(job, started) if job.segments is not None
                      else self._play_stream(job, text, started))
-        await asyncio.wait_for(operation,
-                               timeout=self.config.timeout_seconds)
+        async def watch_cancel():
+            # Also observe the event locally, without relying solely on the
+            # cross-thread event-loop wakeup to interrupt a network wait.
+            while not job.cancelled.is_set():
+                await asyncio.sleep(0.05)
+            if not job.task.cancelling():
+                job.task.cancel()
+        watcher = asyncio.create_task(watch_cancel())
+        try:
+            await asyncio.wait_for(operation, timeout=self.config.timeout_seconds)
+        finally:
+            watcher.cancel()
+            await asyncio.gather(watcher, return_exceptions=True)
 
     async def _collect_audio(self, text):
-        """Collect at most one future phrase, with a hard RAM limit."""
+        """Collect a complete phrase, with a hard RAM limit."""
         stream = self._stream_factory(text)
         data = bytearray()
         try:
@@ -233,10 +258,10 @@ class ArbyTTS:
                     continue
                 packet = chunk.get("data", b"")
                 if len(data) + len(packet) > self.config.max_prefetch_bytes:
-                    raise MemoryError("Prefetched audio exceeds max_prefetch_bytes")
+                    raise MemoryError("Phrase audio exceeds max_prefetch_bytes")
                 data.extend(packet)
             if not data:
-                raise _SpeechFailure("Edge TTS no devolvió audio para el siguiente segmento")
+                raise _SpeechFailure("Edge TTS no devolvió audio")
             return data
         finally:
             if hasattr(stream, "aclose"):
@@ -271,85 +296,100 @@ class ArbyTTS:
                 await asyncio.gather(pending, return_exceptions=True)
 
     async def _play_stream(self, job, text, started, *, stream_override=None, on_audio_start=None):
+        # Match the working standalone path: complete the MP3 before opening
+        # the player. This avoids probing an unfinished network-fed pipe.
+        job.status = "synthesizing"
+        if stream_override is None:
+            data = await self._collect_audio(text)
+        else:
+            data = bytearray()
+            try:
+                async for chunk in stream_override:
+                    if chunk.get("type") == "audio":
+                        packet = chunk.get("data", b"")
+                        if len(data) + len(packet) > self.config.max_prefetch_bytes:
+                            raise MemoryError("Phrase audio exceeds max_prefetch_bytes")
+                        data.extend(packet)
+            finally:
+                if hasattr(stream_override, "aclose"):
+                    await stream_override.aclose()
+        if not data:
+            raise _SpeechFailure("Edge TTS no devolvió audio")
+        if job.cancelled.is_set():
+            raise asyncio.CancelledError
         env = os.environ.copy()
         if self.config.audio_driver:
             env["SDL_AUDIODRIVER"] = self.config.audio_driver
         if self.config.audio_device:
             env["AUDIODEV"] = self.config.audio_device
-        command = [self._player, "-hide_banner", "-loglevel", "error", "-nodisp",
-                   "-autoexit", "-probesize", "4096", "-analyzeduration", "0",
-                   "-f", "mp3", "-i", "pipe:0"]
-        options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
-        process = None
-        stderr_task = None
-        stream = stream_override
-        diagnostics = bytearray()
-        async def drain_stderr():
-            while True:
-                chunk = await process.stderr.read(1024)
-                if not chunk:
-                    return
-                diagnostics.extend(chunk)
-                del diagnostics[:-4096]
-        try:
-            # Shield process startup so cancellation cannot orphan a new player.
-            startup = asyncio.create_task(asyncio.create_subprocess_exec(
-                *command, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE, env=env, **options))
+        options = ({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt"
+                   else {"start_new_session": True})
+        # The directory is private and removed after playback, including errors
+        # and cancellation. Close the file before spawning for Windows support.
+        with TemporaryDirectory(prefix="arby-tts-") as folder:
+            audio_path = Path(folder) / "speech.mp3"
+            audio_path.write_bytes(data)
+            del data
+            command = [self._player, "-hide_banner", "-loglevel", "error", "-nodisp",
+                       "-autoexit", "-af", "aformat=sample_rates=48000:channel_layouts=stereo",
+                       str(audio_path)]
+            process = None
+            stderr_task = None
+            diagnostics = bytearray()
+
+            async def drain_stderr():
+                while True:
+                    chunk = await process.stderr.read(1024)
+                    if not chunk:
+                        return
+                    diagnostics.extend(chunk)
+                    del diagnostics[:-4096]
+
             try:
-                process = await asyncio.shield(startup)
-            except asyncio.CancelledError:
-                process = await startup
-                raise
-            stderr_task = asyncio.create_task(drain_stderr())
-            if stream is None:
-                stream = self._stream_factory(text)
-            received = False
-            job.status = "streaming"
-            async for chunk in stream:
-                if chunk.get("type") != "audio":
-                    continue
-                data = chunk.get("data", b"")
-                if not data:
-                    continue
-                if process.returncode is not None:
-                    raise _SpeechFailure("ffplay terminó antes de recibir todo el audio; revisa la salida de audio y los permisos del usuario")
-                if not received:
-                    if job.first_chunk_seconds is None:
-                        job.first_chunk_seconds = time.monotonic() - started
-                    if on_audio_start is not None:
-                        on_audio_start()
-                received = True
-                process.stdin.write(data)
-                await process.stdin.drain()
-            if not received:
-                raise _SpeechFailure("Edge TTS no devolvió audio")
-            process.stdin.close()
-            await process.stdin.wait_closed()
-            job.status = "finishing"
-            result = await process.wait()
-            await stderr_task
-            if result != 0:
-                LOGGER.debug("ffplay stderr: %s", diagnostics.decode(errors="replace"))
-                raise _SpeechFailure(f"ffplay terminó con código {result}; revisa la salida de audio y los permisos del usuario")
-        finally:
-            # Kill playback first; then close the stream and diagnostic reader.
-            if process and process.returncode is None:
+                startup = asyncio.create_task(asyncio.create_subprocess_exec(
+                    *command, stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+                    env=env, **options))
                 try:
-                    process.terminate()
-                except ProcessLookupError:
-                    pass
-                try:
-                    await asyncio.wait_for(process.wait(), 1.0)
-                except asyncio.TimeoutError:
+                    process = await asyncio.shield(startup)
+                except asyncio.CancelledError:
+                    process = await startup
+                    raise
+                with self._state:
+                    job.process = process
+                stderr_task = asyncio.create_task(drain_stderr())
+                job.status = "playing"
+                if job.first_chunk_seconds is None:
+                    job.first_chunk_seconds = time.monotonic() - started
+                if on_audio_start is not None:
+                    on_audio_start()
+                result = await process.wait()
+                await stderr_task
+                if result != 0:
+                    detail = diagnostics.decode(errors="replace").strip()
+                    selection = (f"driver={env.get('SDL_AUDIODRIVER', 'default')}, "
+                                 f"device={env.get('AUDIODEV', 'default')}")
+                    # The temporary path is not useful after this method exits.
+                    detail = detail.replace(str(audio_path), "[audio temporal]")
+                    raise _SpeechFailure(f"ffplay terminó con código {result} ({selection})"
+                                         + (f": {detail}" if detail else ""))
+            finally:
+                if process and process.returncode is None:
                     try:
-                        process.kill()
+                        process.terminate()
                     except ProcessLookupError:
                         pass
-                    await process.wait()
-            if stream is not None and hasattr(stream, "aclose"):
-                await stream.aclose()
-            if stderr_task:
-                if not stderr_task.done():
-                    stderr_task.cancel()
-                await asyncio.gather(stderr_task, return_exceptions=True)
+                    try:
+                        await asyncio.wait_for(process.wait(), 1.0)
+                    except asyncio.TimeoutError:
+                        try:
+                            process.kill()
+                        except ProcessLookupError:
+                            pass
+                        await process.wait()
+                with self._state:
+                    job.process = None
+                if stderr_task:
+                    if not stderr_task.done():
+                        stderr_task.cancel()
+                    await asyncio.gather(stderr_task, return_exceptions=True)

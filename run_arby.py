@@ -5,10 +5,12 @@ from queue import Empty
 from contextlib import ExitStack
 import logging
 import os
+import signal
 import threading
 import time
 
 from libraries.core.arby_env import load_environment
+from libraries.audio.arby_audio_recovery import close_strip_and_recover_audio
 from libraries.simulation.arby_demo_bot import DemoBot
 from libraries.simulation.arby_memory_pixels import MemoryPixels
 from libraries.simulation.arby_muted_tts import MutedTTS
@@ -40,6 +42,7 @@ def load_config():
         "ffplay": (str, None, None),
         "audio_driver": (str, None, None),
         "audio_device": (str, None, None),
+        "audio_recover_on_exit": (bool, False, None),
         "mute": (bool, False, None),
         "demo": (bool, False, None),
     }
@@ -62,6 +65,12 @@ def load_config():
                 raise ValueError(f"{variable}: valor inválido ({exc})") from exc
         settings[name] = value
     config = SimpleNamespace(**settings)
+    if config.audio_recover_on_exit and (
+        config.audio_driver != "alsa" or
+        config.audio_device != "plughw:CARD=Headphones,DEV=0"
+    ):
+        raise ValueError("ARBY_AUDIO_RECOVER_ON_EXIT requiere ARBY_AUDIO_DRIVER=alsa y "
+                         "ARBY_AUDIO_DEVICE=plughw:CARD=Headphones,DEV=0.")
     if not 0 < config.bot_timeout < float("inf"):
         raise ValueError("ARBY_BOT_TIMEOUT debe ser positivo y finito.")
     if config.eyes == "matrix" and config.multiplexing is None:
@@ -128,10 +137,18 @@ def main():
     stop, input_done = threading.Event(), threading.Event()
     try:
         with ExitStack() as stack:
+            # Terminal closure and service stop use the same cleanup as salir.
+            if threading.current_thread() is threading.main_thread():
+                for name in ("SIGTERM", "SIGHUP", "SIGINT"):
+                    sig = getattr(signal, name, None)
+                    if sig is not None:
+                        previous = signal.signal(sig, lambda *_: stop.set())
+                        stack.callback(signal.signal, sig, previous)
             # GPIO initialization comes before MatrixOutput can drop privileges.
             pixels = None if args.strip else MemoryPixels(args.strip_leds)
             strip = LedStripController(strip_config, pixels=pixels)
-            stack.callback(strip.close)
+            stack.callback(close_strip_and_recover_audio, strip,
+                           recover=args.strip and args.audio_recover_on_exit)
             matrix = preview = None
             if args.eyes == "matrix":
                 from libraries.eyes.matrix_output import MatrixOutput
@@ -159,6 +176,7 @@ def main():
                 clients.callback(bot.close)
                 if args.mute:
                     tts = MutedTTS()
+                    print("Estado: voz desactivada (ARBY_MUTE=true).", flush=True)
                 else:
                     from libraries.audio.arby_tts import ArbyTTS, TTSConfig
                     overrides = {name: value for name, value in {
@@ -166,6 +184,9 @@ def main():
                         "ffplay_path": args.ffplay, "audio_driver": args.audio_driver,
                         "audio_device": args.audio_device}.items() if value is not None}
                     tts = ArbyTTS(TTSConfig(**overrides))
+                    print(f"Estado: voz activa / driver={args.audio_driver or os.getenv('SDL_AUDIODRIVER') or 'default'}"
+                          f" / device={args.audio_device or os.getenv('AUDIODEV') or 'default'}"
+                          " / salida estéreo 48000 Hz", flush=True)
                 clients.callback(tts.close)
                 runtime = ArbyRuntime(bot, tts, emotion_colors=palette).start()
                 clients.pop_all()  # Ownership is now held by the runtime worker.

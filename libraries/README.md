@@ -25,11 +25,21 @@ uv run python -m unittest discover -s libraries/tests -v
 El contexto está en `libraries/bot/contexto_arby.md` y el índice generado se
 almacena en `libraries/bot/faiss_index/`. El `.env` sigue en la raíz del proyecto.
 
-# Voz de Arby por streaming
+# Voz de Arby por frases completas
 
-La entrada es un texto completo. `edge-tts` recibe ese texto y entrega audio MP3 progresivamente; los bytes van a la entrada estándar de `ffplay`, que decodifica y reproduce. No se crean archivos de audio ni se espera a descargar toda la respuesta antes de enviarla al reproductor. Hay búferes de red y reproducción, así que no se garantiza latencia cero.
+La entrada es un texto completo. `edge-tts` entrega MP3 en fragmentos; Arby
+completa cada frase antes de iniciar `ffplay`. Para reproducirla crea un archivo
+en un directorio temporal privado que se elimina al terminar, fallar o cancelar.
+La salida se convierte a estéreo a 48 kHz. Es el mismo camino de reproducción
+por archivo usado en la prueba manual USB, sin las opciones de sondeo reducido
+de la antigua tubería. No se garantiza que esto resuelva todos los fallos de
+hardware: requiere validación en la tarjeta física.
 
-Esta entrega añade voz; conserva tu versión actual de `arby_bot.py`, sus cambios de estilo, modelo, reintentos y FAISS. No modifica tus frases fijas ni su caché. El stream añadido es de audio TTS, no de tokens de Gemini. La respuesta de Gemini llega completa antes de iniciar esta síntesis.
+La siguiente frase puede prepararse en memoria mientras suena la actual.
+Cada frase tiene un límite de 4 MiB por defecto (`max_prefetch_bytes`). La primera
+espera a completar su síntesis antes de sonar. No se guardan audios como caché.
+El cierre normal elimina los temporales; SIGKILL o un corte eléctrico pueden
+impedir esa limpieza.
 
 ## 1. Instalar y probar en Windows con uv
 
@@ -78,9 +88,9 @@ tts.close()
 | `wait(timeout=None)` | Espera el final; True si terminó, incluso si fue cancelado o falló; False si vence la espera |
 | `stop()` | Cancela la petición y termina ffplay; espera hasta 5 segundos y devuelve si terminó |
 | `close()` | Detiene y cierra la instancia; no acepta más textos |
-| `last_status` | idle, starting, streaming, finishing, completed, cancelled o failed |
+| `last_status` | idle, starting, synthesizing, playing, completed, cancelled o failed |
 | `last_error` | Resumen del error o None |
-| `first_chunk_seconds` | Tiempo desde aceptar el texto hasta recibir el primer fragmento; NO mide inicio audible |
+| `first_chunk_seconds` | Tiempo desde aceptar el texto hasta iniciar el primer reproductor; NO mide inicio audible |
 | `total_seconds` | Duración total de la operación, incluida reproducción; disponible al terminar |
 
 No existe cola automática: un False significa que NO quedó pendiente para después. `is_speaking` es un estado de operación ocupada, no un detector de voz audible; para animación exacta haría falta medir la salida de audio. Límite inicial: 4000 caracteres, 120 segundos por operación completa. Ambos se ajustan en `TTSConfig`.
@@ -133,7 +143,7 @@ En una GUI/Pygame, Gemini debe ejecutarse en un worker. Transfiere el resultado 
 
 Usa los mismos módulos con Python 3.10 o superior e instala el paquete del sistema que incluya `ffplay` (en Raspberry Pi OS normalmente `sudo apt install ffmpeg`). No requiere CUDA.
 
-El proceso hijo hereda el entorno de audio de tu programa. Tu script original define `SDL_AUDIODRIVER` y `AUDIODEV` para ALSA; si deseas configurarlos expresamente para streaming:
+El proceso hijo hereda el entorno de audio de tu programa. Tu script original define `SDL_AUDIODRIVER` y `AUDIODEV` para ALSA; si deseas configurarlos expresamente para reproducción:
 
 ```python
 tts = ArbyTTS(TTSConfig(

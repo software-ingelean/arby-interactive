@@ -1,7 +1,7 @@
 # Integración de Arby: emociones por oración
 
 La entrada actual es texto escrito en consola. La aplicación usa `ArbyBot`
-con respuestas divididas en segmentos, tu `ArbyTTS` de Edge con streaming a ffplay y las
+con respuestas divididas en segmentos, tu `ArbyTTS` de Edge con reproducción de cada frase completa mediante ffplay y las
 animaciones de ojos aprobadas. La tira conserva 55 NeoPixel, GPIO BCM12, orden
 GRB y brillo inicial de 20 %, como en el archivo que enviaste.
 
@@ -33,7 +33,7 @@ Conserva tus versiones actuales de `arby_knowledge.py`,
 El bot incluido devuelve `segments` y un `response` agregado calculado en Python.
 Cada segmento tiene `matrix_state`, `strip_led` y `response`, y el bot continúa
 exponiendo `EMOTION_COLORS`. La librería TTS debe tener `speak`, `wait`, `stop`
-y `close`, como en la versión de streaming que ya usamos.
+y `close`, como en la interfaz de voz existente.
 
 Si tu `main.py` ya hace otras tareas, consérvalo y ejecuta `run_arby.py`
 directamente. Para llamar esta aplicación desde un main dedicado:

@@ -1,10 +1,14 @@
 """Offline lifecycle tests and real ffplay decoding with SDL dummy audio."""
 import asyncio
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import threading
+import sys
+from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from libraries.audio.arby_tts import ArbyTTS, TTSConfig
 from libraries.audio.plant_speech import PlantSpeech
@@ -79,21 +83,23 @@ class TTSTests(unittest.TestCase):
         tts.stop()
 
     @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg not installed")
-    def test_real_ffplay_pipe(self):
-        # Generate a tone in memory, stream MP3 packets, decode through ffplay.
+    def test_real_ffplay_complete_phrase(self):
+        # Generate mono MP3 chunks; play the complete phrase with real ffplay.
         audio = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error",
             "-f", "lavfi", "-i", "sine=frequency=440:duration=0.6",
             "-ar", "24000", "-ac", "1", "-codec:a", "libmp3lame",
             "-b:a", "48k", "-f", "mp3", "pipe:1"],
             check=True, capture_output=True, timeout=10).stdout
+        synthesized = threading.Event()
         async def stream(_):
             yield {"type": "WordBoundary", "text": "ignored"}
             for offset in range(0, len(audio), 512):
                 yield {"type": "audio", "data": audio[offset:offset + 512]}
                 await asyncio.sleep(0.005)
+            synthesized.set()
         with ArbyTTS(TTSConfig(audio_driver="dummy", timeout_seconds=10),
                      stream_factory=stream) as tts:
-            tts.speak("test tone")
+            tts.speak_segments(["test tone"], on_segment=lambda _: self.assertTrue(synthesized.is_set()))
             self.assertTrue(tts.wait(12))
             self.assertEqual(tts.last_status, "completed", tts.last_error)
             self.assertIsNotNone(tts.first_chunk_seconds)
@@ -106,7 +112,7 @@ class TTSTests(unittest.TestCase):
             self.assertTrue(tts.wait(5))
             self.assertEqual(tts.last_status, "failed")
 
-    def test_cancel_real_player_while_waiting_for_audio(self):
+    def test_cancel_synthesis_before_opening_player(self):
         opened = threading.Event()
         async def stream(_):
             opened.set()
@@ -115,8 +121,59 @@ class TTSTests(unittest.TestCase):
         with ArbyTTS(TTSConfig(audio_driver="dummy"), stream_factory=stream) as tts:
             tts.speak("hola")
             self.assertTrue(opened.wait(3))
+            self.assertIsNone(tts._job.process)
             self.assertTrue(tts.stop())
             self.assertEqual(tts.last_status, "cancelled")
+
+    @unittest.skipIf(os.name == "nt", "POSIX executable fixture")
+    def test_repeated_stop_reaps_player_and_removes_audio(self):
+        opened = threading.Event()
+        folders = []
+        def audio_directory(**kwargs):
+            folder = TemporaryDirectory(**kwargs)
+            folders.append(Path(folder.name))
+            return folder
+        async def stream(_):
+            yield {"type": "audio", "data": b"complete audio"}
+        with TemporaryDirectory() as folder:
+            player = Path(folder) / "slow-player"
+            player.write_text(f"#!{sys.executable}\nimport time\ntime.sleep(30)\n")
+            player.chmod(0o755)
+            with patch('libraries.audio.arby_tts.TemporaryDirectory', side_effect=audio_directory):
+                with ArbyTTS(TTSConfig(ffplay_path=str(player)), stream_factory=stream) as tts:
+                    tts.speak_segments(["cancel playback"], on_segment=lambda _: opened.set())
+                    self.assertTrue(opened.wait(3))
+                    process = tts._job.process
+                    self.assertIsNotNone(process)
+                    self.assertTrue((folders[0] / "speech.mp3").is_file())
+                    tts.stop(timeout=0)
+                    tts.close()
+                    tts.close()
+                    self.assertTrue(tts.wait(0))
+                    self.assertIsNotNone(process.returncode)
+                    self.assertEqual(tts.last_status, "cancelled")
+                    self.assertFalse(folders[0].exists())
+
+    @unittest.skipIf(os.name == "nt", "POSIX executable fixture")
+    def test_player_failure_reports_device_and_stderr(self):
+        async def stream(_):
+            await asyncio.sleep(0.2)
+            yield {"type": "audio", "data": b"audio"}
+        with TemporaryDirectory() as folder:
+            player = Path(folder) / "failed-player"
+            player.write_text(f"#!{sys.executable}\n"
+                              "import os, sys\n"
+                              "sys.stderr.write('ALSA: cannot open ' + os.environ['AUDIODEV'])\n"
+                              "sys.exit(1)\n")
+            player.chmod(0o755)
+            config = TTSConfig(ffplay_path=str(player), audio_driver="alsa",
+                               audio_device="plughw:CARD=Headphones,DEV=0")
+            with ArbyTTS(config, stream_factory=stream) as tts:
+                tts.speak("test")
+                self.assertTrue(tts.wait(3))
+                self.assertEqual(tts.last_status, "failed")
+                self.assertIn("ALSA: cannot open plughw:CARD=Headphones,DEV=0", tts.last_error)
+                self.assertIn("driver=alsa", tts.last_error)
 
 
 class FakeFixed:
