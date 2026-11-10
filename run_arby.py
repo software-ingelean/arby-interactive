@@ -20,6 +20,9 @@ from libraries.core.arby_runtime import ArbyRuntime
 from libraries.leds.arby_strip_led import LedStripController, StripConfig
 
 
+_console_output_lock = threading.Lock()
+
+
 def load_config():
     """Read typed settings from the process environment (including loaded .env)."""
     fields = {
@@ -100,11 +103,17 @@ def _console(runtime, stop, input_done):
                 continue
             try:
                 if text.casefold() in {"reiniciar", "/reiniciar"}:
-                    runtime.reset_session()
+                    pending = runtime.reset_session()
                 elif text.startswith("/frase "):
-                    runtime.submit_fixed_phrase(text[7:])
+                    pending = runtime.submit_fixed_phrase(text[7:])
                 else:
-                    runtime.submit_text(text)
+                    pending = runtime.submit_text(text)
+                # Keep rendering and playback on their own threads, but do not
+                # offer another console turn until this request has finished.
+                while not pending.done():
+                    if stop.wait(0.03):
+                        return
+                _print_events(runtime)
             except (ValueError, RuntimeError) as exc:
                 print(f"\n{exc}")
     finally:
@@ -112,6 +121,13 @@ def _console(runtime, stop, input_done):
 
 
 def _print_events(runtime):
+    # The main loop and console may drain events concurrently. Holding this
+    # through printing ensures a drained reply is visible before the next input.
+    with _console_output_lock:
+        _drain_events(runtime)
+
+
+def _drain_events(runtime):
     while True:
         try:
             kind, message = runtime.events.get_nowait()

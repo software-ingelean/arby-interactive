@@ -194,8 +194,8 @@ class ArbyRuntime:
                         self.tts.stop()
                     except Exception:
                         LOGGER.warning("Playback cleanup failed")
-                    request.future.set_exception(exc)
                     self.events.put(("error", f"No se completó la solicitud: {type(exc).__name__}"))
+                    request.future.set_exception(exc)
                     LOGGER.debug("Request failed", exc_info=True)
                 finally:
                     self._set_visual("default", IDLE_COLOR, "idle")

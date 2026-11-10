@@ -15,3 +15,9 @@ Ejecuta desde la raíz:
 Los errores simulados que aparecen en los logs son parte de las pruebas.
 La tarjeta USB de la Raspberry y la escucha de la voz deben verificarse en el
 equipo: la salida dummy solo valida la decodificación y el cierre del reproductor.
+
+La síntesis reintenta fallos de conexión hasta tres intentos en total, con pausas
+de 0,5 y 1 segundo y dentro del timeout global. Cada intento descarta el MP3
+parcial anterior; no repite una frase ya reproducida. No reintenta cancelaciones
+ni fallos de verificación de certificados. El diagnóstico de conexión muestra
+los tipos de excepción y números de error del sistema, sin URLs ni tokens.

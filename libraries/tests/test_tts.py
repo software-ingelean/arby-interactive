@@ -3,15 +3,74 @@ import asyncio
 import os
 from pathlib import Path
 import shutil
+import ssl
 import subprocess
 import threading
 import sys
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from libraries.audio.arby_tts import ArbyTTS, TTSConfig
 from libraries.audio.plant_speech import PlantSpeech
+from libraries.audio.arby_tts import _connection_detail
+
+
+@unittest.skipUnless(shutil.which("ffplay"), "ffplay not installed")
+class SynthesisRetryTests(unittest.TestCase):
+    def test_retry_discards_partial_mp3_before_starting_again(self):
+        attempts = []
+        closed = []
+        async def stream(_):
+            attempts.append(1)
+            attempt = len(attempts)
+            try:
+                yield {"type": "audio", "data": b"partial" if attempt == 1 else b"complete"}
+                if attempt == 1:
+                    raise ConnectionResetError(104, "sensitive request URL")
+            finally:
+                closed.append(attempt)
+        with ArbyTTS(stream_factory=stream) as tts:
+            with patch('libraries.audio.arby_tts.asyncio.sleep', new_callable=AsyncMock):
+                data = asyncio.run(tts._collect_audio("test"))
+        self.assertEqual(data, b"complete")
+        self.assertEqual(closed, [1, 2])
+
+    def test_attempts_are_bounded_and_diagnostic_hides_urls(self):
+        attempts = []
+        async def stream(_):
+            attempts.append(1)
+            raise ConnectionResetError(104, "https://example.test/private?token=secret")
+            yield
+        with ArbyTTS(stream_factory=stream) as tts:
+            with patch('libraries.audio.arby_tts.asyncio.sleep', new_callable=AsyncMock):
+                with self.assertRaises(ConnectionResetError) as caught:
+                    asyncio.run(tts._collect_audio("test"))
+        self.assertEqual(len(attempts), 3)
+        detail = _connection_detail(caught.exception)
+        self.assertIn("errno=104", detail)
+        self.assertNotIn("secret", detail)
+        self.assertNotIn("https", detail)
+
+    def test_certificate_failure_is_not_retried(self):
+        async def stream(_):
+            raise ssl.SSLCertVerificationError(1, "certificate failure")
+            yield
+        with ArbyTTS(stream_factory=stream) as tts:
+            with patch('libraries.audio.arby_tts.asyncio.sleep', new_callable=AsyncMock) as sleep:
+                with self.assertRaises(ssl.SSLCertVerificationError):
+                    asyncio.run(tts._collect_audio("test"))
+                sleep.assert_not_awaited()
+
+    def test_cancellation_is_not_retried(self):
+        async def stream(_):
+            raise asyncio.CancelledError
+            yield
+        with ArbyTTS(stream_factory=stream) as tts:
+            with patch('libraries.audio.arby_tts.asyncio.sleep', new_callable=AsyncMock) as sleep:
+                with self.assertRaises(asyncio.CancelledError):
+                    asyncio.run(tts._collect_audio("test"))
+                sleep.assert_not_awaited()
 
 
 class QuietTTS(ArbyTTS):

@@ -276,6 +276,39 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("expresión enojado", messages)
         self.assertIn("Arby: Test", messages)
 
+    def test_console_waits_for_playback_and_prints_before_next_prompt(self):
+        bot, tts = FakeBot(), FakeTTS()
+        tts.finished.clear()
+        runtime = ArbyRuntime(bot, tts, emotion_colors=PALETTE,
+                              minimum_display=0).start()
+        stop, done = threading.Event(), threading.Event()
+        prompts = []
+
+        def read_input(prompt):
+            prompts.append(prompt)
+            if len(prompts) == 1:
+                return "/frase Hola"
+            self.assertTrue(tts.finished.is_set())
+            messages = " ".join(str(call) for call in printer.call_args_list)
+            self.assertIn("Arby: Hola", messages)
+            raise EOFError
+
+        try:
+            with patch("builtins.input", side_effect=read_input), patch("builtins.print") as printer:
+                reader = threading.Thread(target=run_arby._console,
+                                          args=(runtime, stop, done), daemon=True)
+                reader.start()
+                self.assertTrue(tts.started.wait(1))
+                self.assertFalse(done.wait(0.1))
+                self.assertEqual(len(prompts), 1)
+                tts.finished.set()
+                self.assertTrue(done.wait(1))
+                reader.join(1)
+                self.assertEqual(len(prompts), 2)
+        finally:
+            stop.set()
+            runtime.close()
+
     def test_matrix_requires_confirmed_mapping(self):
         with patch.dict("os.environ", {"ARBY_EYES": "matrix"}):
             with self.assertRaisesRegex(ValueError, "ARBY_MULTIPLEXING"):

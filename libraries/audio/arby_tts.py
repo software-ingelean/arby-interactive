@@ -7,6 +7,7 @@ import logging
 import os
 from pathlib import Path
 import shutil
+import ssl
 import subprocess
 import threading
 from tempfile import TemporaryDirectory
@@ -18,6 +19,30 @@ LOGGER = logging.getLogger(__name__)
 
 class _SpeechFailure(RuntimeError):
     """Local diagnostic without request URLs or spoken text."""
+
+
+def _connection_detail(error):
+    """Report exception classes and OS errors, never request URLs or tokens."""
+    parts, seen = [], set()
+    while error is not None and id(error) not in seen and len(parts) < 5:
+        seen.add(id(error))
+        detail = type(error).__name__
+        number = getattr(error, "errno", None)
+        if isinstance(number, int):
+            detail += f" errno={number} ({os.strerror(number)})"
+        parts.append(detail)
+        error = error.__cause__ or error.__context__
+    return " -> ".join(parts)
+
+
+def _certificate_error(error):
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        if isinstance(error, ssl.SSLCertVerificationError):
+            return True
+        error = error.__cause__ or error.__context__
+    return False
 
 
 @dataclass(frozen=True)
@@ -215,6 +240,7 @@ class ArbyTTS:
                 # Never include the input text or a raw request URL in the log.
                 detail = (str(error) if isinstance(error, _SpeechFailure) else
                           "tiempo de espera de voz agotado" if isinstance(error, TimeoutError) else
+                          f"falló la conexión de síntesis: {_connection_detail(error)}" if isinstance(error, OSError) else
                           "síntesis o reproducción no completada")
                 job.error = f"{type(error).__name__}: {detail}"
                 LOGGER.warning("Arby TTS failed: %s", job.error)
@@ -249,6 +275,18 @@ class ArbyTTS:
             await asyncio.gather(watcher, return_exceptions=True)
 
     async def _collect_audio(self, text):
+        """Retry synthesis only, before any of this phrase has been played."""
+        for attempt in range(3):
+            try:
+                return await self._collect_audio_once(text)
+            except (OSError, TimeoutError) as exc:
+                if _certificate_error(exc) or attempt == 2:
+                    raise
+                LOGGER.warning("Conexión Edge TTS interrumpida (%s); reintento %s/2.",
+                               _connection_detail(exc), attempt + 1)
+                await asyncio.sleep(0.5 * (attempt + 1))
+
+    async def _collect_audio_once(self, text):
         """Collect a complete phrase, with a hard RAM limit."""
         stream = self._stream_factory(text)
         data = bytearray()
