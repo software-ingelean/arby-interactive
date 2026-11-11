@@ -1,3 +1,4 @@
+# sudo "$(pwd)/.venv/bin/python" "$(pwd)/run_arby.py"
 """Compose text/microphone input, bot, TTS, eyes and NeoPixel strip."""
 import sys
 from types import SimpleNamespace
