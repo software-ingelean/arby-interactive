@@ -59,11 +59,15 @@ Para Arby, configura en tu .env:
 ```dotenv
 ARBY_EYES=matrix
 ARBY_MATRIX_MAPPING=regular-oe5
+ARBY_MATRIX_RGB_SEQUENCE=BGR
 ARBY_MULTIPLEXING=6
 ARBY_STRIP_GPIO=12
 ```
 
 Conserva el multiplexado que hayas confirmado en tus paneles si difiere de 6.
+Usa BGR cuando rojo y azul estén intercambiados; conserva RGB si ya son correctos.
+En matrix_scan y demo_eyes puedes pasar `--rgb-sequence BGR` para esta corrección.
+No requiere recompilar el controlador y solo afecta las matrices, no la tira.
 Ejecuta `sudo .venv/bin/python run_arby.py` desde la raíz del proyecto.
 Para los ojos sin bot:
 

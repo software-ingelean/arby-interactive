@@ -2,7 +2,7 @@
 class MatrixOutput:
     def __init__(self, *, multiplexing, slowdown=2, brightness=25,
                  row_address_type=0, swap_eyes=False, disable_hardware_pulsing=False,
-                 hardware_mapping="regular"):
+                 hardware_mapping="regular", rgb_sequence="RGB"):
         if multiplexing is None:
             raise ValueError("El panel 1/8 requiere validar multiplexing con el hardware.")
         if not 1 <= brightness <= 100:
@@ -16,6 +16,9 @@ class MatrixOutput:
         if hardware_mapping not in ("regular", "regular-oe5"):
             raise ValueError("hardware_mapping debe ser regular o regular-oe5")
         options.hardware_mapping = hardware_mapping
+        if rgb_sequence not in ("RGB", "RBG", "GRB", "GBR", "BRG", "BGR"):
+            raise ValueError("rgb_sequence debe ser una permutación de RGB")
+        options.led_rgb_sequence = rgb_sequence
         options.gpio_slowdown = slowdown
         options.brightness = brightness
         options.multiplexing = multiplexing

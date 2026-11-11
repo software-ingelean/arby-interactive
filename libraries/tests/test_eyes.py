@@ -157,6 +157,10 @@ class EyesTests(unittest.TestCase):
                              frame.crop((32,0,64,32)).tobytes())
             adapter.close()
             self.assertTrue(adapter.matrix.cleared)
+            custom = MatrixOutput(multiplexing=6, hardware_mapping='regular-oe5', rgb_sequence='BGR')
+            self.assertEqual(custom.matrix.options.led_rgb_sequence, 'BGR')
+            self.assertTrue(custom.matrix.options.disable_hardware_pulsing)
+            custom.close()
 
 
 if __name__=='__main__':

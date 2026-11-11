@@ -21,6 +21,7 @@ def run_panel(args):
     options.chain_length = args.chain_length
     options.parallel = 1
     options.hardware_mapping = args.hardware_mapping
+    options.led_rgb_sequence = args.rgb_sequence
     options.brightness = 10
     options.gpio_slowdown = 4
     options.disable_hardware_pulsing = True
@@ -56,6 +57,7 @@ def main():
                         help='Segundos por color y patrón (por defecto: 2).')
     parser.add_argument('--row-address-type', type=int, default=0)
     parser.add_argument('--hardware-mapping', choices=['regular', 'regular-oe5'], default='regular')
+    parser.add_argument('--rgb-sequence', choices=['RGB', 'RBG', 'GRB', 'GBR', 'BRG', 'BGR'], default='RGB')
     parser.add_argument('--chain-length', type=int, choices=[1, 2], default=1,
                         help='Paneles encadenados por OUT → IN (por defecto: 1).')
     parser.add_argument('--panel-type', choices=['default', 'FM6126A', 'FM6127'],
@@ -79,6 +81,7 @@ def main():
                 '--row-address-type', str(args.row_address_type),
                 '--chain-length', str(args.chain_length),
                 '--hardware-mapping', args.hardware_mapping,
+                '--rgb-sequence', args.rgb_sequence,
                 '--panel-type', args.panel_type,
             ])
             if result.returncode:

@@ -52,6 +52,7 @@ def load_config():
         "row_address_type": (int, 0, None),
         "matrix_brightness": (int, 25, None),
         "matrix_mapping": (str, "regular", ("regular", "regular-oe5")),
+        "matrix_rgb_sequence": (str, "RGB", ("RGB", "RBG", "GRB", "GBR", "BRG", "BGR")),
         "slowdown": (int, 2, None),
         "swap_eyes": (bool, False, None),
         "model": (str, None, None),
@@ -216,6 +217,7 @@ def main():
                     row_address_type=args.row_address_type, slowdown=args.slowdown,
                     brightness=args.matrix_brightness, swap_eyes=args.swap_eyes,
                     hardware_mapping=args.matrix_mapping,
+                    rgb_sequence=args.matrix_rgb_sequence,
                     disable_hardware_pulsing=args.strip)
                 stack.callback(matrix.close)
             elif args.eyes == "preview":
