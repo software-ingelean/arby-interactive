@@ -74,6 +74,13 @@ Para `run_arby.py` con la tira física, consulta la
 para NeoPixel y, cuando el backend lo requiera, `sudo` con la ruta explícita
 al Python de ese entorno.
 
+En modo matriz, Arby configura `RGBMatrixOptions.drop_privileges = False`
+para conservar acceso al proyecto, al entorno virtual y al índice cuando están
+dentro del directorio personal. Si arrancas con `sudo`, el proceso completo
+conserva permisos de root. Sin esta opción, el controlador puede cambiar a
+`nobody` y los imports posteriores fallar con `No module named 'libraries.bot'`.
+El aviso sobre `isolcpus=3` es una sugerencia de rendimiento y no causa ese error.
+
 ### Variables de entorno de Arby
 
 Después de `uv sync`, copia `.env.example` a `.env` si aún no existe:

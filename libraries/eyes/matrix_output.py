@@ -9,6 +9,10 @@ class MatrixOutput:
             raise ValueError("brightness debe estar entre 1 y 100")
         from rgbmatrix import RGBMatrix, RGBMatrixOptions
         options = RGBMatrixOptions()
+        # Arby still imports modules, reads its index and starts audio after
+        # matrix initialization. Switching to nobody would make a checkout
+        # and virtualenv under a private home directory inaccessible.
+        options.drop_privileges = False
         options.rows = 32
         options.cols = 32
         options.chain_length = 2

@@ -136,6 +136,8 @@ class EyesTests(unittest.TestCase):
                 self.image=image
         class FakeMatrix:
             def __init__(self,options):
+                if getattr(options, 'drop_privileges', True):
+                    raise PermissionError('Matrix initialization would drop access to the project')
                 self.options=options
                 self.width,self.height=64,32
                 self.cleared=False

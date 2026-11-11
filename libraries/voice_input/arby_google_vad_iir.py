@@ -34,7 +34,6 @@ from silero_onnx import load_silero_vad, VADIterator
 
 FS_IN = 48_000
 FS_OUT = 16_000
-CHANNELS = 2
 S32_SCALE = 2_147_483_648.0
 
 VAD_FRAME = 512
@@ -43,6 +42,20 @@ VAD_FRAME_BYTES = VAD_FRAME * 2
 
 def log(*args):
     print(*args, file=sys.stderr, flush=True)
+
+
+def input_layout(sd, device, channel):
+    """Keep I2S stereo selection while accepting mono capture devices."""
+    info = sd.query_devices(device, kind="input")
+    maximum = int(info["max_input_channels"])
+    if maximum < 1:
+        raise ValueError(
+            f"ARBY_MIC_DEVICE={device}: {info['name']} no tiene canales de entrada. "
+            "Lista los dispositivos con: .venv/bin/python -m sounddevice"
+        )
+    channels = min(2, maximum)
+    selected = 0 if channels == 1 or channel == "left" else 1
+    return info, channels, selected
 
 
 class FiltroVoz:
@@ -401,6 +414,7 @@ class ArbyPipeline:
         log("[FILTER] Configurando filtro IIR de voz...")
         import sounddevice as sd
 
+        device_info, channels, channel = input_layout(sd, self.args.device, self.args.channel)
         self.vad_model = load_silero_vad()
         self.vad = VADIterator(
             self.vad_model,
@@ -422,8 +436,8 @@ class ArbyPipeline:
         }
 
         log(
-            f"[AUDIO] I2S device={self.args.device}, "
-            f"48 kHz, stereo S32; canal={self.args.channel}"
+            f"[AUDIO] device={self.args.device} ({device_info['name']}), "
+            f"48 kHz, {channels} canal(es) S32; canal={channel}"
         )
         log(
             f"[FILTER] HPF={self.args.graves:g} Hz; "
@@ -440,7 +454,6 @@ class ArbyPipeline:
             f"silence={self.args.silence_ms} ms; "
             f"preroll={self.args.preroll_ms} ms"
         )
-        log("[READY] Di 'Arby'.")
 
         block_count = 0
         total_proc = 0.0
@@ -451,12 +464,13 @@ class ArbyPipeline:
             with sd.InputStream(
                 device=self.args.device,
                 samplerate=FS_IN,
-                channels=CHANNELS,
+                channels=channels,
                 dtype="int32",
                 blocksize=self.block_samples,
                 latency="low",
                 callback=self.callback,
             ):
+                log("[READY] Di 'Arby'.")
                 paused = False
                 while not self.stop_event.is_set():
                     if self.is_paused():
@@ -481,8 +495,6 @@ class ArbyPipeline:
                         continue
 
                     t0 = time.perf_counter()
-
-                    channel = 0 if self.args.channel == "left" else 1
 
                     # Conversión de S32_LE a float32 normalizado.
                     mono = (
