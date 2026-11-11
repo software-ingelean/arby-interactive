@@ -1,7 +1,8 @@
 """Optional adapter for hzeller/rpi-rgb-led-matrix. No GPIO imports in preview."""
 class MatrixOutput:
     def __init__(self, *, multiplexing, slowdown=2, brightness=25,
-                 row_address_type=0, swap_eyes=False, disable_hardware_pulsing=False):
+                 row_address_type=0, swap_eyes=False, disable_hardware_pulsing=False,
+                 hardware_mapping="regular"):
         if multiplexing is None:
             raise ValueError("El panel 1/8 requiere validar multiplexing con el hardware.")
         if not 1 <= brightness <= 100:
@@ -12,12 +13,14 @@ class MatrixOutput:
         options.cols = 32
         options.chain_length = 2
         options.parallel = 1
-        options.hardware_mapping = "regular"
+        if hardware_mapping not in ("regular", "regular-oe5"):
+            raise ValueError("hardware_mapping debe ser regular o regular-oe5")
+        options.hardware_mapping = hardware_mapping
         options.gpio_slowdown = slowdown
         options.brightness = brightness
         options.multiplexing = multiplexing
         options.row_address_type = row_address_type
-        options.disable_hardware_pulsing = disable_hardware_pulsing
+        options.disable_hardware_pulsing = disable_hardware_pulsing or hardware_mapping == "regular-oe5"
         self.matrix = RGBMatrix(options=options)
         if self.matrix.width != 64 or self.matrix.height != 32:
             self.matrix.Clear()

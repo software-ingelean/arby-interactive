@@ -14,6 +14,9 @@ def main():
     parser.add_argument('--row-address-type',type=int,default=0)
     parser.add_argument('--brightness',type=int,default=25)
     parser.add_argument('--slowdown',type=int,default=2)
+    parser.add_argument('--hardware-mapping', choices=['regular', 'regular-oe5'], default='regular')
+    parser.add_argument('--led-no-hardware-pulse', action='store_true',
+                        help='Desactiva el pulso por hardware para evitar el conflicto con snd_bcm2835; puede aumentar el parpadeo.')
     parser.add_argument('--swap-eyes',action='store_true')
     parser.add_argument('--auto',action='store_true')
     args=parser.parse_args()
@@ -29,7 +32,9 @@ def main():
         from libraries.eyes.matrix_output import MatrixOutput
         output=MatrixOutput(multiplexing=args.multiplexing,slowdown=args.slowdown,
                             brightness=args.brightness,row_address_type=args.row_address_type,
-                            swap_eyes=args.swap_eyes)
+                            swap_eyes=args.swap_eyes,
+                            hardware_mapping=args.hardware_mapping,
+                            disable_hardware_pulsing=args.led_no_hardware_pulse)
         start=time.monotonic()
         try:
             while True:

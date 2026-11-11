@@ -51,6 +51,7 @@ def load_config():
         "multiplexing": (int, None, None),
         "row_address_type": (int, 0, None),
         "matrix_brightness": (int, 25, None),
+        "matrix_mapping": (str, "regular", ("regular", "regular-oe5")),
         "slowdown": (int, 2, None),
         "swap_eyes": (bool, False, None),
         "model": (str, None, None),
@@ -113,8 +114,10 @@ def load_config():
     if config.eyes == "matrix" and config.multiplexing is None:
         raise ValueError("ARBY_MULTIPLEXING es obligatorio en modo matrix; valida el valor sobre tus paneles.")
     matrix_pins = {4, 7, 8, 9, 10, 11, 17, 18, 22, 23, 24, 25, 27}
+    if config.matrix_mapping == "regular-oe5":
+        matrix_pins = (matrix_pins - {18}) | {5}
     if config.eyes == "matrix" and config.strip and config.strip_gpio in matrix_pins:
-        raise ValueError("ARBY_STRIP_GPIO coincide con el cableado regular de las matrices.")
+        raise ValueError("ARBY_STRIP_GPIO coincide con el cableado de las matrices seleccionado.")
     if config.strip_gpio < 0 or config.strip_leds < 1 or not 0 <= config.strip_brightness <= 100:
         raise ValueError("Revisa ARBY_STRIP_GPIO (>=0), ARBY_STRIP_LEDS (>0) y ARBY_STRIP_BRIGHTNESS (0–100).")
     if not 1 <= config.matrix_brightness <= 100:
@@ -212,6 +215,7 @@ def main():
                 matrix = MatrixOutput(multiplexing=args.multiplexing,
                     row_address_type=args.row_address_type, slowdown=args.slowdown,
                     brightness=args.matrix_brightness, swap_eyes=args.swap_eyes,
+                    hardware_mapping=args.matrix_mapping,
                     disable_hardware_pulsing=args.strip)
                 stack.callback(matrix.close)
             elif args.eyes == "preview":
