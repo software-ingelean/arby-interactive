@@ -7,7 +7,8 @@ import threading
 import time
 
 from libraries.eyes.arby_eyes import EMOTION_STATES, normalize_state
-from libraries.core.arby_response import normalize_reply, validate_color
+from libraries.audio.arby_recordings import BOT_ERROR, BOT_TRY_LATER, REPEAT_QUESTION
+from libraries.core.arby_response import normalize_reply, validate_color, make_segment
 from libraries.core.arby_ambient import AmbientAction
 
 LOGGER = logging.getLogger(__name__)
@@ -16,6 +17,11 @@ IDLE_COLOR = (40, 215, 255)
 
 def validate_reply(reply):
     return normalize_reply(reply)
+
+
+class ConversationFuture(Future):
+    """A completed answer can ask the microphone to reopen its follow-up window."""
+    retry_requested = False
 
 
 @dataclass(frozen=True)
@@ -127,7 +133,7 @@ class ArbyRuntime:
         with self._lock:
             if self._closed or self._thread is None:
                 raise RuntimeError("Runtime must be started and open")
-            future = Future()
+            future = ConversationFuture()
             try:
                 # Keep a separate slot for the single idle action, so even a
                 # queue_size of one admits a visitor while the action is queued.
@@ -243,6 +249,38 @@ class ArbyRuntime:
         if self.tts.last_error:
             self.events.put(("error", f"TTS: {self.tts.last_error}"))
 
+    def _model_reply(self, text):
+        """Speak one bounded fallback for query/validation failures, not TTS failures."""
+        try:
+            reply = self.bot.respond(text)
+            if self._stop.is_set():
+                raise CancelledError()
+            reply = validate_reply(reply)
+            if not reply['segments']:
+                raise ValueError('Empty assistant response')
+            error = getattr(self.bot, 'last_error', None)
+            retry = isinstance(error, str) and bool(error)
+            if retry:
+                self.events.put(('error', 'No se pudo completar la consulta al asistente.'))
+            asks_to_repeat = reply['response'] == REPEAT_QUESTION
+            if asks_to_repeat:
+                # The model may split this known prompt into two sentences. Keep
+                # the catalog phrase intact so its local recording can be reused.
+                reply = normalize_reply(make_segment(REPEAT_QUESTION, 'duda'))
+            return reply, retry or asks_to_repeat
+        except CancelledError:
+            raise
+        except Exception as exc:
+            if self._stop.is_set():
+                raise CancelledError() from exc
+            # Never echo provider details or the user's question into the fallback.
+            self.events.put(('error', f'Consulta al asistente: {type(exc).__name__}'))
+            LOGGER.warning('Assistant query failed: %s', type(exc).__name__)
+            return normalize_reply({'segments': [
+                make_segment(BOT_ERROR, 'pensativos'),
+                make_segment(BOT_TRY_LATER, 'duda'),
+            ]}), True
+
     def _work(self):
         try:
             while not self._stop.is_set():
@@ -264,10 +302,7 @@ class ArbyRuntime:
                     else:
                         if request.kind == "text":
                             self._set_visual("cargando", IDLE_COLOR, "loading")
-                            reply = self.bot.respond(request.payload)
-                            if self._stop.is_set():
-                                raise CancelledError()
-                            reply = validate_reply(reply)
+                            reply, request.future.retry_requested = self._model_reply(request.payload)
                         else:
                             reply = request.payload
                         self.events.put(("response", reply["response"]))

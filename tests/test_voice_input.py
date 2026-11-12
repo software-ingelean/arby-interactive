@@ -60,31 +60,113 @@ class VoiceTests(unittest.TestCase):
                          ["¿Cómo estás?"])
 
     def test_unrecognized_voice_requests_repetition_only_after_activation(self):
-        prompt = Future()
-        request_repetition, deliver = Mock(return_value=prompt), Mock()
-        generation = [0]
-        worker = GoogleWorker(queue.Queue(), threading.Event(), "es-CO", 8,
-                              on_question=deliver, on_unrecognized=request_repetition,
-                              generation=lambda: generation[0])
-        recognize = worker.recognizer.recognize_google = Mock(side_effect=[
-            sr.UnknownValueError(), "Arby", sr.RequestError("sin conexión"),
-            sr.UnknownValueError(), "¿Cómo estás?",
-        ])
-        pcm = bytes(1024)
-        for _ in range(3):
-            worker._recognize(pcm)
-        request_repetition.assert_not_called()
-        worker._recognize(pcm)
-        request_repetition.assert_called_once_with()
-        worker._recognize(pcm)
-        self.assertEqual(recognize.call_count, 4)
-        deliver.assert_not_called()
+        for failure in (sr.UnknownValueError(), sr.RequestError('offline'), TimeoutError(), ConnectionError()):
+            with self.subTest(failure=type(failure).__name__):
+                prompt = Future()
+                feedback, deliver = Mock(return_value=prompt), Mock()
+                worker = GoogleWorker(queue.Queue(), threading.Event(), 'es-CO', 8,
+                                      on_question=deliver, on_unrecognized=feedback)
+                recognize = worker.recognizer.recognize_google = Mock(side_effect=[failure, 'Arby', failure, '¿Cómo estás?'])
+                worker._recognize(bytes(1024))
+                feedback.assert_not_called()
+                worker._recognize(bytes(1024))
+                worker._recognize(bytes(1024))
+                feedback.assert_called_once_with()
+                worker._recognize(bytes(1024))
+                self.assertEqual(recognize.call_count, 3)
+                prompt.set_result(None)
+                worker._recognize(bytes(1024))
+                deliver.assert_called_once_with('¿Cómo estás?')
 
-        # Playback pauses capture and clears the previous wake state.
+    def test_empty_transcription_asks_to_repeat(self):
+        feedback = Mock(return_value=Future())
+        worker = GoogleWorker(queue.Queue(), threading.Event(), 'es-CO', 8, on_unrecognized=feedback)
+        worker.recognizer.recognize_google = Mock(side_effect=['Arby', '   '])
+        worker._recognize(bytes(1024))
+        worker._recognize(bytes(1024))
+        feedback.assert_called_once_with()
+
+    def test_model_failure_reopens_only_after_audio_and_echo_tail(self):
+        future = Future()
+        deliver = Mock(return_value=future)
+        paused = [False]
+        generation = [0]
+        worker = GoogleWorker(queue.Queue(), threading.Event(), 'es-CO', 8, on_question=deliver,
+                              is_paused=lambda: paused[0], generation=lambda: generation[0])
+        worker.recognizer.recognize_google = Mock(side_effect=['Arby, pregunta', 'pregunta repetida'])
+        worker._recognize(bytes(1024))
+        future.retry_requested = True
+        future.set_result(None)
+        paused[0] = True
         generation[0] += 1
+        worker._resume_followup()
+        self.assertIsNone(worker.deadline)
+        paused[0] = False
+        worker._recognize(bytes(1024))
+        self.assertEqual(deliver.call_args_list, [unittest.mock.call('pregunta'), unittest.mock.call('pregunta repetida')])
+
+    def test_silence_after_activation_gets_only_one_reminder(self):
+        prompt = Future()
+        feedback = Mock(return_value=prompt)
+        worker = GoogleWorker(queue.Queue(), threading.Event(), 'es-CO', 8, on_unrecognized=feedback)
+        worker._listen_for_command()
+        worker._expire_followup()
+        feedback.assert_called_once_with()
         prompt.set_result(None)
-        worker._recognize(pcm)
-        deliver.assert_called_once_with("¿Cómo estás?")
+        worker._resume_followup()
+        self.assertEqual(worker.mode, 'COMMAND')
+        worker._expire_followup()
+        feedback.assert_called_once_with()
+        self.assertEqual(worker.mode, 'WAKE')
+
+    def test_repeated_failures_are_bounded_until_new_activation(self):
+        def finished_prompt():
+            future = Future()
+            future.set_result(None)
+            return future
+        feedback = Mock(side_effect=finished_prompt)
+        worker = GoogleWorker(queue.Queue(), threading.Event(), 'es-CO', 8, on_unrecognized=feedback)
+        worker.recognizer.recognize_google = Mock(side_effect=['Arby'] + [sr.UnknownValueError()] * 6 + ['Arby', sr.UnknownValueError()])
+        for _ in range(7):
+            worker._recognize(bytes(1024))
+        self.assertEqual(feedback.call_count, 2)
+        worker._recognize(bytes(1024))
+        worker._recognize(bytes(1024))
+        self.assertEqual(feedback.call_count, 3)
+
+    def test_successful_answer_and_cancelled_prompt_do_not_reopen_capture(self):
+        answer = Future()
+        deliver = Mock(return_value=answer)
+        worker = GoogleWorker(queue.Queue(), threading.Event(), 'es-CO', 8, on_question=deliver)
+        worker.recognizer.recognize_google = Mock(side_effect=['Arby, pregunta', 'ruido después'])
+        worker._recognize(bytes(1024))
+        answer.set_result(None)
+        worker._recognize(bytes(1024))
+        self.assertEqual(worker.mode, 'WAKE')
+        deliver.assert_called_once_with('pregunta')
+        cancelled = Future()
+        cancelled.cancel()
+        worker.repeat_prompt = cancelled
+        worker._resume_followup()
+        self.assertEqual(worker.mode, 'WAKE')
+        self.assertIsNone(worker.deadline)
+
+    def test_failed_stale_or_paused_recognition_never_speaks(self):
+        for reason in ('stale', 'paused', 'stopped'):
+            generation, paused = [0], [False]
+            stop = threading.Event()
+            feedback = Mock(return_value=Future())
+            worker = GoogleWorker(queue.Queue(), stop, 'es-CO', 8, on_unrecognized=feedback,
+                                  generation=lambda: generation[0], is_paused=lambda: paused[0])
+            worker._listen_for_command()
+            def recognize(*args, **kwargs):
+                if reason == 'stale': generation[0] += 1
+                elif reason == 'paused': paused[0] = True
+                else: stop.set()
+                raise sr.UnknownValueError()
+            worker.recognizer.recognize_google = recognize
+            worker._recognize(bytes(1024))
+            feedback.assert_not_called()
 
     def test_expired_activation_does_not_deliver(self):
         self.assertEqual(self.recognize(["Arby", "pregunta tardía"], followup=-1), [])

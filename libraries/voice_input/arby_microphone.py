@@ -33,7 +33,7 @@ class MicrophoneInput:
     def submit(self, text):
         if not self.is_paused():
             self.runtime.events.put(("info", f"Tú: {text}"))
-            self.runtime.submit_text(text)
+            return self.runtime.submit_text(text)
 
     def request_repetition(self):
         if not self.is_paused():

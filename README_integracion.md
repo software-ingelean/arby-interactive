@@ -413,3 +413,37 @@ puedes usar `ARBY_MIC_CHANNEL=right`. Los demás ajustes están en `.env.example
 Las colas son acotadas y cada segmento se limita a 15 segundos para controlar
 memoria y latencia; al llegar al límite se envía ese segmento al reconocimiento.
 Ctrl+C, SIGTERM y el cierre de la ventana detienen también la captura.
+
+
+## Recuperación de preguntas por voz
+
+Después de activar a Arby, si Google STT devuelve audio no reconocido, texto vacío,
+un error de servicio o agota la espera de red, Arby dice «Perdón, no te escuché bien.
+¿Me lo repites?». Si se activa pero no llega una pregunta, recuerda una sola vez que
+la está esperando. El ruido sin una activación reconocida no genera avisos hablados.
+
+Si la consulta al asistente falla o devuelve una respuesta inválida, usa las frases
+locales «Se me enredaron un poquito las ramas» y «¿Me lo repites en un momento?».
+El fallback que ya devuelve el bot se reproduce una sola vez. Si el modelo no
+comprende una pregunta, se le indica pedir la repetición con la frase del catálogo,
+sin inventar la intención. Esto no altera el esquema de respuestas ni las emociones.
+
+Al terminar el aviso y la pausa para evitar eco del altavoz, se abre otra ventana
+`ARBY_MIC_FOLLOWUP_SECONDS` para repetir sin decir «Arby». Hay como máximo dos
+recuperaciones automáticas por activación; después se vuelve a esperar el nombre.
+Decir «Arby» inicia una nueva activación. Los resultados de STT anteriores a una
+pausa se descartan. No se vuelve a consultar al modelo automáticamente ni se
+encadenan avisos si falla la salida de audio.
+
+Para que estas frases se escuchen incluso si se pierde internet, genera previamente
+las grabaciones con la voz, velocidad y tono que usará el equipo. Desde el proyecto,
+con conexión y Arby detenido:
+
+```bash
+sudo .venv/bin/python -m libraries.audio.arby_recordings
+sudo systemctl start arby
+```
+
+El TTS utiliza primero las grabaciones de `assets/phrases`. Sin la grabación del
+perfil actual necesita conexión para sintetizar el aviso; no puede garantizar voz
+si también falla esa conexión. Regenera las grabaciones si cambias el perfil de voz.

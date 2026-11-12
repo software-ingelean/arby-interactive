@@ -5,7 +5,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from libraries.audio.arby_recordings import EVENT_PHRASES
+from libraries.audio.arby_recordings import EVENT_PHRASES, BOT_ERROR, BOT_TRY_LATER, REPEAT_QUESTION
 from libraries.core.arby_ambient import AmbientSequence, AmbientSettings, INVITATIONS
 from libraries.core.arby_runtime import ArbyRuntime, validate_reply
 from libraries.leds.arby_strip_led import LedStripController, StripConfig
@@ -189,10 +189,78 @@ class RuntimeTests(unittest.TestCase):
         bad["strip_led"]["color"]["r"] = 999
         bot.respond = lambda text: bad if text == "bad" else good
         runtime, bot, tts = self.create(bot=bot)
-        with self.assertRaises(ValueError):
-            runtime.submit_text("bad").result(timeout=1)
-        runtime.submit_text("good").result(timeout=1)
-        self.assertEqual(tts.spoken, ["Hello"])
+        failed = runtime.submit_text("bad")
+        failed.result(timeout=1)
+        self.assertTrue(failed.retry_requested)
+        success = runtime.submit_text("good")
+        success.result(timeout=1)
+        self.assertFalse(success.retry_requested)
+        self.assertEqual(tts.spoken, [BOT_ERROR, BOT_TRY_LATER, "Hello"])
+
+    def test_query_exception_speaks_fallback_once_and_worker_recovers(self):
+        bot = FakeBot()
+        def respond(text):
+            if text == 'fail':
+                raise TimeoutError('private provider details')
+            return make_reply(text)
+        bot.respond = respond
+        runtime, _, tts = self.create(bot=bot)
+        future = runtime.submit_text('fail')
+        reply = future.result(timeout=1)
+        self.assertTrue(future.retry_requested)
+        self.assertEqual(tts.spoken, [BOT_ERROR, BOT_TRY_LATER])
+        self.assertNotIn('private', reply['response'])
+        runtime.submit_text('recovered').result(timeout=1)
+        self.assertEqual(tts.spoken[-1], 'recovered')
+
+    def test_existing_bot_fallback_is_not_announced_twice(self):
+        bot = FakeBot()
+        bot.last_error = 'TimeoutError'
+        bot.respond = lambda text: {'segments': [
+            {'matrix_state': 'pensativos', 'strip_led': {'color': {'r': 120, 'g': 60, 'b': 255}, 'mood': 'pensativos'}, 'response': BOT_ERROR},
+            {'matrix_state': 'duda', 'strip_led': {'color': {'r': 255, 'g': 180, 'b': 0}, 'mood': 'duda'}, 'response': BOT_TRY_LATER},
+        ]}
+        runtime, _, tts = self.create(bot=bot)
+        future = runtime.submit_text('question')
+        future.result(timeout=1)
+        self.assertTrue(future.retry_requested)
+        self.assertEqual(tts.spoken, [BOT_ERROR, BOT_TRY_LATER])
+
+    def test_clarification_response_requests_followup_without_error(self):
+        bot = FakeBot()
+        reply = make_reply(REPEAT_QUESTION)
+        bot.respond = lambda text: reply
+        runtime, _, tts = self.create(bot=bot)
+        future = runtime.submit_text('unclear')
+        future.result(timeout=1)
+        self.assertTrue(future.retry_requested)
+        self.assertEqual(tts.spoken, [REPEAT_QUESTION])
+
+    def test_split_clarification_uses_one_recordable_prompt(self):
+        bot = FakeBot()
+        first = make_reply('Perdón, no te escuché bien.')
+        second = make_reply('¿Me lo repites?')
+        bot.respond = lambda text: {'segments': [first, second]}
+        runtime, _, tts = self.create(bot=bot)
+        future = runtime.submit_text('unclear')
+        future.result(timeout=1)
+        self.assertTrue(future.retry_requested)
+        self.assertEqual(tts.spoken, [REPEAT_QUESTION])
+
+    def test_broken_audio_does_not_recursively_speak_an_error(self):
+        tts = FakeTTS()
+        attempts = []
+        def broken_speak(text):
+            attempts.append(text)
+            raise RuntimeError('speaker unavailable')
+        tts.speak = broken_speak
+        runtime, bot, _ = self.create(tts=tts)
+        future = runtime.submit_text('valid question')
+        with self.assertRaises(RuntimeError):
+            future.result(timeout=1)
+        self.assertEqual(attempts, ['valid question'])
+        self.assertFalse(future.retry_requested)
+        self.assertEqual(bot.calls, ['valid question'])
 
     def test_close_cancels_pending_and_prevents_late_speech(self):
         entered, release = threading.Event(), threading.Event()

@@ -13,7 +13,7 @@ import re
 from threading import RLock
 
 from libraries.audio.arby_recordings import (
-    BOT_ERROR, BOT_TRY_LATER, IDENTITY_CHOOSE, IDENTITY_CLARIFY,
+    BOT_ERROR, BOT_TRY_LATER, IDENTITY_CHOOSE, IDENTITY_CLARIFY, REPEAT_QUESTION,
 )
 from libraries.core.arby_env import load_environment
 from libraries.bot.arby_knowledge import KnowledgeStore, normalize
@@ -85,6 +85,14 @@ Si la persona rechaza una propuesta concreta, acepta su decisión.
 Puedes abrir otro tema con suavidad si sigue participando.
 Si se despide o pide terminar, cierra sin otra pregunta.
 """
+
+
+CLARIFICATION_INSTRUCTIONS = (
+    'Si la pregunta es incompleta, confusa o parece mal transcrita y no puedes '
+    'comprenderla, no inventes lo que quisieron decir: responde solo con la frase '
+    f'«{REPEAT_QUESTION}» y emoción duda para pedir que la repitan. '
+    'No uses esta frase solo por desconocer un dato: en ese caso dilo naturalmente.'
+)
 
 
 OUTPUT_INSTRUCTIONS = """
@@ -379,6 +387,7 @@ class ArbyBot:
                 instructions = EVENT_STYLE if self.config.event_mode else (
                     STYLE + "\n\n" + self.knowledge.instructions + "\n\n" + CONVERSATION_STYLE
                 )
+                instructions += "\n\n" + CLARIFICATION_INSTRUCTIONS
                 instructions += "\n\n" + OUTPUT_INSTRUCTIONS
                 instructions += "\n\nESTADO DE SESIÓN (datos):\n" + json.dumps(state, ensure_ascii=False)
                 contents = []

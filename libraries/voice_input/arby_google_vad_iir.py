@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+from concurrent.futures import Future
 import queue
 import re
 import signal
@@ -38,6 +39,7 @@ S32_SCALE = 2_147_483_648.0
 
 VAD_FRAME = 512
 VAD_FRAME_BYTES = VAD_FRAME * 2
+MAX_RECOVERY_ATTEMPTS = 2
 
 
 def log(*args):
@@ -179,6 +181,9 @@ class GoogleWorker(threading.Thread):
         self.on_question = on_question
         self.on_unrecognized = on_unrecognized
         self.repeat_prompt = None
+        self.answer_future = None
+        self.retry_count = 0
+        self.timeout_prompted = False
         self.is_paused = is_paused or (lambda: False)
         self.generation = generation or (lambda: 0)
 
@@ -203,9 +208,7 @@ class GoogleWorker(threading.Thread):
                     and self.deadline
                     and time.monotonic() > self.deadline
                 ):
-                    self.mode = "WAKE"
-                    self.deadline = None
-                    log("[TIMEOUT] No llegó una pregunta. Esperando 'Arby'.")
+                    self._expire_followup()
                 continue
 
             try:
@@ -214,11 +217,51 @@ class GoogleWorker(threading.Thread):
                 self.jobs.task_done()
 
     def _resume_followup(self):
-        # Wait for playback and the microphone's speaker-tail pause to end.
+        # The generation changes while speakers play; reopen only after playback
+        # AND the microphone's echo-tail pause, never from a Future callback.
+        if self.stop_event.is_set() or self.is_paused():
+            return
         prompt = self.repeat_prompt
-        if prompt is not None and prompt.done() and not self.is_paused():
-            self._listen_for_command()
-            self.repeat_prompt = None
+        if prompt is not None:
+            if prompt.done():
+                self.repeat_prompt = None
+                if not prompt.cancelled():
+                    self._listen_for_command()
+            return
+        answer = self.answer_future
+        if answer is not None and answer.done():
+            self.answer_future = None
+            if (not answer.cancelled() and getattr(answer, 'retry_requested', False)
+                    and self.retry_count < MAX_RECOVERY_ATTEMPTS):
+                self.retry_count += 1
+                self._listen_for_command()
+
+    def _request_repeat(self, generation):
+        """Only address an activated visitor; cap feedback to avoid noise loops."""
+        if (self.mode != 'COMMAND' or self.on_unrecognized is None
+                or self.stop_event.is_set() or self.is_paused()
+                or generation != self.generation()):
+            return
+        self.mode, self.deadline = 'WAKE', None
+        if self.retry_count >= MAX_RECOVERY_ATTEMPTS:
+            log("[ARBY] Fin de reintentos. Esperando 'Arby'.")
+            return
+        try:
+            prompt = self.on_unrecognized()
+        except (ValueError, RuntimeError) as exc:
+            log(f'[ARBY] No se pudo pedir repetición: {type(exc).__name__}')
+            return
+        if isinstance(prompt, Future):
+            self.retry_count += 1
+            self.repeat_prompt = prompt
+
+    def _expire_followup(self):
+        # Silence after an activation gets one reminder, not repeated announcements.
+        if not self.timeout_prompted:
+            self.timeout_prompted = True
+            self._request_repeat(self.generation())
+        self.mode, self.deadline = 'WAKE', None
+        log("[TIMEOUT] No llegó una pregunta. Esperando repetición o 'Arby'.")
 
     def _listen_for_command(self):
         self.mode = "COMMAND"
@@ -229,10 +272,12 @@ class GoogleWorker(threading.Thread):
         if self.stop_event.is_set() or self.is_paused():
             return
         self._resume_followup()
-        if self.repeat_prompt is not None:
+        if self.repeat_prompt is not None or (self.answer_future is not None and not self.answer_future.done()):
             return
         if self.deadline is not None and time.monotonic() > self.deadline:
-            self.mode, self.deadline = "WAKE", None
+            self._expire_followup()
+            if self.repeat_prompt is not None:
+                return
         audio = sr.AudioData(pcm, FS_OUT, 2)
         generation = self.generation()
         start = time.perf_counter()
@@ -251,24 +296,18 @@ class GoogleWorker(threading.Thread):
         except sr.UnknownValueError:
             elapsed = time.perf_counter() - start
             log(f"[GOOGLE] (no reconocido) | {elapsed:.2f}s")
-            if (self.mode == "COMMAND" and self.on_unrecognized is not None
-                    and not self.stop_event.is_set() and not self.is_paused()
-                    and generation == self.generation()):
-                try:
-                    self.repeat_prompt = self.on_unrecognized()
-                except (ValueError, RuntimeError) as exc:
-                    log(f"[ARBY] {exc}")
-                if self.repeat_prompt is not None:
-                    self.mode, self.deadline = "WAKE", None
+            self._request_repeat(generation)
             return
 
         except sr.RequestError as exc:
             elapsed = time.perf_counter() - start
-            log(f"[GOOGLE] Error de servicio/red: {exc} | {elapsed:.2f}s")
+            log(f"[GOOGLE] Error de servicio/red: {type(exc).__name__} | {elapsed:.2f}s")
+            self._request_repeat(generation)
             return
 
         except Exception as exc:
-            log(f"[GOOGLE] Error: {exc}")
+            log(f"[GOOGLE] Error: {type(exc).__name__}")
+            self._request_repeat(generation)
             return
 
         if (self.stop_event.is_set() or self.is_paused()
@@ -278,6 +317,8 @@ class GoogleWorker(threading.Thread):
             matched, remainder = wake_match(text)
 
             if matched:
+                self.retry_count = 0
+                self.timeout_prompted = False
                 log("[ARBY] ACTIVADO")
 
                 if remainder:
@@ -300,7 +341,9 @@ class GoogleWorker(threading.Thread):
     def deliver(self, text):
         if self.on_question is not None and not self.stop_event.is_set():
             try:
-                self.on_question(text)
+                future = self.on_question(text)
+                if isinstance(future, Future):
+                    self.answer_future = future
             except (ValueError, RuntimeError) as exc:
                 log(f"[ARBY] {exc}")
 
@@ -364,7 +407,8 @@ class ArbyPipeline:
         """Cover VAD, queued/in-flight recognition and the wake follow-up."""
         with self._activity_lock:
             if (not self._ready.is_set() or self._capturing_voice
-                    or self.google_worker.repeat_prompt is not None):
+                    or self.google_worker.repeat_prompt is not None
+                    or self.google_worker.answer_future is not None):
                 return True
             with self.google_q.mutex:
                 if self.google_q.unfinished_tasks:
