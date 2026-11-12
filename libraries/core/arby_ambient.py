@@ -97,6 +97,7 @@ class AmbientAction:
     matrix_state: str
     text: str = ""
     duration_seconds: float = 0
+    color: tuple[int, int, int] | None = None
 
 
 GESTURES = (

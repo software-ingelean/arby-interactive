@@ -10,11 +10,12 @@ import threading
 import time
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request, session
+from flask import Flask, jsonify, render_template, request, session, send_file
 from werkzeug.security import check_password_hash
 
 from libraries.core.arby_ambient import DEFAULT_DATABASE
-from libraries.core.arby_support import initialize, settings, save_settings, runtime_status, enqueue, connect
+from libraries.audio.arby_devices import inventory, load_selection
+from libraries.core.arby_support import TESTS, initialize, settings, save_settings, runtime_status, enqueue, connect
 
 SYSTEM_HELPER = ['/usr/bin/sudo', '-n', '/usr/bin/python3', '-I', '/usr/local/libexec/arby-system.py']
 
@@ -80,6 +81,10 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
     def index():
         return render_template('index.html')
 
+    @app.get('/assets/arby.webp')
+    def brand_asset():
+        return send_file(Path(__file__).resolve().parents[2] / 'assets' / 'arby.webp', mimetype='image/webp')
+
     @app.get('/api/session')
     def session_info():
         session.setdefault('csrf', secrets.token_hex(32))
@@ -115,7 +120,7 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
         live = runtime_status(database)
         saved = settings(database)
         effective = live.get('effective', {})
-        live['pending_changes'] = bool(effective) and (saved['ambient'] != effective.get('ambient') or any(effective.get('controls', {}).get(key) != value for key, value in saved['controls'].items()))
+        live['pending_changes'] = bool(effective) and (saved['ambient'] != effective.get('ambient') or any(effective.get('controls', {}).get(key) != value for key, value in saved['controls'].items()) or saved['audio'] != effective.get('audio', {'input': None, 'output': None}))
         with closing(connect(database)) as db:
             commands = [dict(row) for row in db.execute('SELECT * FROM support_commands ORDER BY created DESC LIMIT 5')]
         for command in commands:
@@ -124,9 +129,11 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
         defaults = {'mute': os.getenv('ARBY_MUTE', '').lower() in ('1', 'true', 'yes', 'on'),
                     'rate': os.getenv('ARBY_RATE') or '+12%',
                     'mic_gain_db': os.getenv('ARBY_MIC_GAIN_DB') or 6,
+                    'mic_channel': os.getenv('ARBY_MIC_CHANNEL') or 'left',
                     'matrix_brightness': os.getenv('ARBY_MATRIX_BRIGHTNESS') or 25,
                     'strip_brightness': os.getenv('ARBY_STRIP_BRIGHTNESS') or 20}
-        return jsonify(runtime=live, saved=saved, defaults=defaults, commands=commands)
+        return jsonify(runtime=live, saved=saved, defaults=defaults, commands=commands,
+                       tests=[{'id': key, 'label': item['label'], 'requires': item['requires']} for key, item in TESTS.items()])
 
     @app.put('/api/settings')
     def update_settings():
@@ -136,6 +143,20 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
     @app.post('/api/tests')
     def tests():
         return jsonify(id=enqueue(body().get('kind'), database)), 202
+
+    @app.get('/api/audio/devices')
+    def audio_devices():
+        return jsonify(inventory(load_selection(database)))
+
+    @app.post('/api/tests/cancel')
+    def cancel_test():
+        return jsonify(id=enqueue('cancel', database)), 202
+
+    @app.post('/api/power')
+    def power():
+        if body().get('target') != 'shutdown':
+            raise ValueError('Acción de energía no permitida.')
+        return jsonify(system('shutdown'))
 
     @app.get('/api/network')
     def network():

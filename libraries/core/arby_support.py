@@ -11,9 +11,10 @@ import sqlite3
 import time
 import uuid
 
+from libraries.audio.arby_devices import load_selection, validate_selection
 from libraries.audio.arby_recordings import SOUND_TEST
 from libraries.core.arby_ambient import (
-    DEFAULT_DATABASE, AmbientSettings, load_ambient_settings, save_ambient_settings,
+    DEFAULT_DATABASE, AmbientSettings, AmbientAction, load_ambient_settings, save_ambient_settings,
 )
 
 # Explicit allowlist: hardware wiring and provider credentials stay in .env.
@@ -21,8 +22,31 @@ CONTROLS = {
     'mute': (bool, None, None),
     'rate': (str, None, None),
     'mic_gain_db': (float, -30, 36),
+    'mic_channel': (str, None, None),
     'matrix_brightness': (int, 1, 100),
     'strip_brightness': (int, 0, 100),
+}
+
+
+TESTS = {
+    'speaker': {'label': 'Probar sonido', 'requires': ('speaker',),
+                'action': AmbientAction('phrase', 'alegres', 'Hola, soy Arby. Esta es una prueba de sonido.')},
+    'greeting': {'label': 'Saludo de Arby', 'requires': ('speaker',),
+                 'action': AmbientAction('phrase', 'alegres', '¡Hola! Soy Arby, tu plantita de compañía. Acércate y conversemos un ratito.')},
+    'invitation': {'label': 'Invitar a conversar', 'requires': ('speaker',),
+                   'action': AmbientAction('phrase', 'sorprendidos', '¿Sabías que las plantas tienen muchas historias que contar? Pregúntame algo y lo descubrimos juntos.')},
+    'eyes': {'label': 'Guiño', 'requires': ('eyes',),
+             'action': AmbientAction('eyes', 'guiño ojo', duration_seconds=3)},
+    'happy': {'label': 'Ojos alegres', 'requires': ('eyes',),
+              'action': AmbientAction('eyes', 'alegres', duration_seconds=3)},
+    'surprise': {'label': 'Sorpresa', 'requires': ('eyes',),
+                 'action': AmbientAction('eyes', 'sorprendidos', duration_seconds=3)},
+    'sleep': {'label': 'Ojos dormidos', 'requires': ('eyes',),
+              'action': AmbientAction('eyes', 'dormido', duration_seconds=3)},
+    **{f'light_{key}': {'label': f'Luz {label}', 'requires': ('strip',),
+                        'action': AmbientAction('lights', 'default', duration_seconds=3, color=color)}
+       for key, label, color in (('red', 'roja', (255, 0, 0)), ('green', 'verde', (0, 255, 0)),
+                                 ('blue', 'azul', (0, 0, 255)))},
 }
 
 
@@ -42,6 +66,8 @@ def initialize(database=DEFAULT_DATABASE):
     with closing(connect(database)) as db, db:
         db.executescript('''
             CREATE TABLE IF NOT EXISTS support_settings (
+                id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS support_audio_settings (
                 id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS support_runtime (
                 id INTEGER PRIMARY KEY CHECK(id=1), updated REAL NOT NULL, value TEXT NOT NULL);
@@ -70,7 +96,7 @@ def validate_controls(values):
         if kind is bool:
             valid = type(value) is bool
         elif kind is str:
-            valid = isinstance(value, str) and re.fullmatch(r'[+-]\d{1,3}%', value) and -50 <= int(value[:-1]) <= 100
+            valid = value in ('left', 'right') if key == 'mic_channel' else (isinstance(value, str) and re.fullmatch(r'[+-]\d{1,3}%', value) and -50 <= int(value[:-1]) <= 100)
         else:
             valid = type(value) in (int, float) and math.isfinite(value) and low <= value <= high
             if kind is int:
@@ -82,7 +108,7 @@ def validate_controls(values):
 
 
 def save_settings(payload, database=DEFAULT_DATABASE):
-    if not isinstance(payload, dict) or set(payload) != {'ambient', 'controls'}:
+    if not isinstance(payload, dict) or set(payload) not in ({'ambient', 'controls'}, {'ambient', 'controls', 'audio'}):
         raise ValueError('Se requieren ambiente y controles.')
     raw = payload['ambient']
     if not isinstance(raw, dict) or set(raw) != set(asdict(AmbientSettings())):
@@ -91,16 +117,20 @@ def save_settings(payload, database=DEFAULT_DATABASE):
         raise ValueError('Los intervalos deben ser números.')
     ambient = AmbientSettings(**raw)
     controls = validate_controls(payload['controls'])
+    audio = validate_selection(payload['audio']) if 'audio' in payload else None
     # One transaction for both the existing ambient singleton and new overrides.
     with closing(connect(database)) as db, db:
         db.execute('''UPDATE arby_ambient_settings SET mode=?, gesture_min_seconds=?,
             gesture_max_seconds=?, invitation_min_seconds=?, invitation_max_seconds=? WHERE id=1''',
             (ambient.mode, *ambient.gesture_range, *ambient.invitation_range))
         db.execute('INSERT OR REPLACE INTO support_settings VALUES(1, ?)', (json.dumps(controls),))
+        if audio is not None:
+            db.execute('INSERT OR REPLACE INTO support_audio_settings VALUES(1, ?)', (json.dumps(audio),))
 
 
 def settings(database=DEFAULT_DATABASE):
-    return {'ambient': asdict(load_ambient_settings(database)), 'controls': load_overrides(database)}
+    return {'ambient': asdict(load_ambient_settings(database)), 'controls': load_overrides(database),
+            'audio': load_selection(database)}
 
 
 def runtime_status(database=DEFAULT_DATABASE):
@@ -114,7 +144,7 @@ def runtime_status(database=DEFAULT_DATABASE):
 
 
 def enqueue(kind, database=DEFAULT_DATABASE):
-    if kind not in ('speaker', 'eyes'):
+    if kind not in TESTS and kind != 'cancel':
         raise ValueError('Prueba desconocida.')
     status = runtime_status(database)
     if not status['fresh'] or status.get('state') != 'ready':
@@ -122,7 +152,7 @@ def enqueue(kind, database=DEFAULT_DATABASE):
     identifier = uuid.uuid4().hex
     with closing(connect(database)) as db, db:
         db.execute('BEGIN IMMEDIATE')
-        if db.execute("SELECT 1 FROM support_commands WHERE state IN ('pending','running') AND created>?",
+        if kind != 'cancel' and db.execute("SELECT 1 FROM support_commands WHERE state IN ('pending','running') AND created>?",
                       (time.time() - 30,)).fetchone():
             raise ValueError('Ya hay una prueba en curso.')
         db.execute('INSERT INTO support_commands VALUES(?,?,?,?,?)',
@@ -171,7 +201,7 @@ class SupportBridge:
                 if self.pending:
                     identifier, future, kind = self.pending
                     if future.done():
-                        failed = future.cancelled() or future.exception() is not None or (kind == 'speaker' and bool(getattr(tts, 'last_error', None)))
+                        failed = future.cancelled() or future.exception() is not None or ('speaker' in TESTS[kind]['requires'] and bool(getattr(tts, 'last_error', None)))
                         db.execute("UPDATE support_commands SET state=?,message=? WHERE id=? AND state='running'",
                                    ('error' if failed else 'done',
                                     'La prueba se interrumpió o falló. Comprueba el componente e intenta nuevamente.' if failed else 'Prueba terminada. Confirma el resultado físicamente.', identifier))
@@ -186,6 +216,16 @@ class SupportBridge:
                     action = (AmbientAction('phrase', 'alegres', SOUND_TEST)
                               if row['kind'] == 'speaker' else AmbientAction('eyes', 'guiño ojo', duration_seconds=2))
                     future = submit(action) if enabled else None
+                row = db.execute("SELECT * FROM support_commands WHERE state='pending' ORDER BY CASE WHEN kind='cancel' THEN 0 ELSE 1 END, created LIMIT 1").fetchone()
+                if row and row['kind'] == 'cancel':
+                    stopped = self.pending is not None and runtime.cancel_ambient(self.pending[1])
+                    db.execute('UPDATE support_commands SET state=?,message=? WHERE id=?',
+                               ('done', 'Demostración interrumpida.' if stopped else 'No hay una demostración en curso.', row['id']))
+                elif row and self.pending is None:
+                    definition = TESTS[row['kind']]
+                    enabled = all(self.snapshot['components'].get(component, {}).get('state') != 'disabled'
+                                  for component in definition['requires'])
+                    future = submit(definition['action']) if enabled else None
                     message = 'Prueba en curso.' if future else 'No disponible: componente desactivado o Arby ocupado. Intenta de nuevo.'
                     db.execute('UPDATE support_commands SET state=?,message=? WHERE id=?',
                                ('running' if future else 'error', message, row['id']))
@@ -195,6 +235,8 @@ class SupportBridge:
             self.snapshot['phase'] = runtime.visual.phase
             if microphone:
                 self.snapshot['microphone_activity'] = microphone.pipeline.visitor_active
+                recent = time.monotonic() - getattr(microphone.pipeline, 'last_audio_at', 0) < 2
+                self.snapshot['microphone_level'] = getattr(microphone.pipeline, 'input_level', 0) if recent else 0
             if touch:
                 self.snapshot['last_touch'] = getattr(touch, 'last_touch', None)
             if getattr(tts, 'last_error', None):

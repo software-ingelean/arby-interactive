@@ -132,6 +132,19 @@ class VoiceTests(unittest.TestCase):
         )
         runtime.submit_text.assert_called_once_with("pregunta")
 
+    def test_support_meter_normalizes_int32_and_uses_selected_channel(self):
+        with patch.dict(os.environ, {}, clear=True):
+            config = run_arby.load_config().microphone
+        pipeline = ArbyPipeline(config)
+        pipeline._capture_channel = 1
+        samples = np.array([[0, 1073741824], [0, -1073741824]], dtype=np.int32)
+        pipeline.callback(samples, 2, None, None)
+        self.assertAlmostEqual(pipeline.input_level, 0.5)
+        pipeline.is_paused = lambda: True
+        pipeline.callback(samples, 2, None, None)
+        self.assertEqual(pipeline.input_level, 0)
+        pipeline.close()
+
     def test_continuous_speech_has_bounded_segment(self):
         with patch.dict(os.environ, {}, clear=True):
             config = run_arby.load_config().microphone

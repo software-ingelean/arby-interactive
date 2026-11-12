@@ -315,6 +315,9 @@ class ArbyPipeline:
         self.generation = 0
         self._activity_lock = threading.RLock()
         self._capturing_voice = False
+        self.input_level = 0.0
+        self._capture_channel = 0
+        self.last_audio_at = 0.0
         self._ready = threading.Event()
         self._on_voice_start = on_voice_start
 
@@ -378,7 +381,11 @@ class ArbyPipeline:
 
     def callback(self, indata, frames, time_info, status):
         if self.stop_event.is_set() or self.is_paused():
+            self.input_level = 0.0
             return
+        self.last_audio_at = time.monotonic()
+        samples = indata[:, self._capture_channel].astype(np.float64) / S32_SCALE
+        self.input_level = min(1.0, float(np.sqrt(np.mean(samples * samples)))) if samples.size else 0.0
         if status:
             log(f"[ALSA] {status}")
 
@@ -478,7 +485,13 @@ class ArbyPipeline:
         log("[FILTER] Configurando filtro IIR de voz...")
         import sounddevice as sd
 
+        preference = getattr(self.args, 'device_identity', None)
+        if preference is not None:
+            from libraries.audio.arby_devices import discover_devices, find_preferred, portaudio_input
+            # Hardware may have been renumbered while bot/matrices initialized.
+            self.args.device = portaudio_input(find_preferred(preference, 'input', discover_devices()), sd)
         device_info, channels, channel = input_layout(sd, self.args.device, self.args.channel)
+        self._capture_channel = channel
         self.vad_model = load_silero_vad()
         self.vad = VADIterator(
             self.vad_model,

@@ -36,10 +36,11 @@ def execute(data):
     if action == 'arby':
         run(['/usr/bin/systemctl', '--no-block', 'restart', 'arby.service'])
         return {'ok': True, 'message': 'Reinicio de Arby solicitado.'}
-    if action == 'raspberry':
+    if action in ('raspberry', 'shutdown'):
         # A short delay allows the HTTP response to reach the browser.
-        run(['/usr/bin/systemd-run', '--on-active=3s', '/usr/bin/systemctl', 'reboot'])
-        return {'ok': True, 'message': 'La Raspberry se reiniciará en unos segundos.'}
+        operation = 'poweroff' if action == 'shutdown' else 'reboot'
+        run(['/usr/bin/systemd-run', '--on-active=3s', '/usr/bin/systemctl', operation])
+        return {'ok': True, 'message': 'La Raspberry se apagará en unos segundos. Espera antes de retirar la alimentación.' if action == 'shutdown' else 'La Raspberry se reiniciará en unos segundos.'}
     if action == 'network':
         devices = run(['/usr/bin/nmcli', '-t', '-f', 'DEVICE,TYPE,STATE,CONNECTION', 'device']).stdout
         addresses = run(['/usr/bin/hostname', '-I']).stdout.strip().split()

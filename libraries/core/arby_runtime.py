@@ -85,7 +85,7 @@ class ArbyRuntime:
             if not count or self._ambient is None or count > 1:
                 return count > 0
             kind = self._ambient.payload.kind
-            return kind == "phrase" or (kind != "eyes" and self._play_ambient_clip is not None)
+            return kind == "phrase" or (kind not in ("eyes", "lights") and self._play_ambient_clip is not None)
 
     def try_submit_ambient(self, action: AmbientAction):
         """Admit at most one ambient action and only into an idle runtime."""
@@ -96,6 +96,14 @@ class ArbyRuntime:
             self._ambient = request
             self._queue.put_nowait(request)
             return request.future
+
+    def cancel_ambient(self, future):
+        """Cancel only the support action that owns this Future, never a visitor."""
+        with self._lock:
+            if self._ambient is not None and self._ambient.future is future:
+                self._ambient.cancel.set()
+                return True
+            return False
 
     def interrupt_ambient(self):
         with self._lock:
@@ -192,9 +200,9 @@ class ArbyRuntime:
                 self._speak(segment, cancel)
             return reply
         state = normalize_state(action.matrix_state)
-        color = validate_color(self.emotion_colors[state])
-        if action.kind == "eyes" or self._play_ambient_clip is None:
-            self._set_visual(state, color, "idle")
+        color = validate_color(action.color if action.color is not None else self.emotion_colors[state])
+        if action.kind in ("eyes", "lights") or self._play_ambient_clip is None:
+            self._set_visual(state, color, "speaking" if action.kind == "lights" else "idle")
             cancel.wait(action.duration_seconds or 1.5)
         else:
             self._set_visual(state, color, "speaking")

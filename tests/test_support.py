@@ -200,6 +200,48 @@ class SupportTests(unittest.TestCase):
             self.assertEqual(response.headers['X-Frame-Options'], 'DENY')
             response.close()
 
+    def test_audio_catalog_requires_auth_and_reports_missing_preference(self):
+        self.assertEqual(self.client.get('/api/audio/devices').status_code, 401)
+        self.login()
+        with patch('libraries.audio.arby_devices.discover_devices', return_value=[]):
+            response = self.client.get('/api/audio/devices')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['devices'], [])
+
+    def test_shutdown_is_authenticated_and_is_not_an_arbitrary_command(self):
+        self.assertEqual(self.request('/api/power', {'target': 'shutdown'}).status_code, 401)
+        self.login()
+        self.assertEqual(self.request('/api/power', {'target': 'shell'}).status_code, 400)
+        self.system.assert_not_called()
+        self.assertEqual(self.request('/api/power', {'target': 'shutdown'}).status_code, 200)
+        self.system.assert_called_once_with('shutdown')
+
+    def test_demo_catalog_and_cancel_endpoint(self):
+        self.login()
+        self.publish()
+        result = self.client.get('/api/status').json
+        self.assertIn('light_red', [item['id'] for item in result['tests']])
+        enqueue('greeting', self.database)
+        self.assertEqual(self.request('/api/tests/cancel').status_code, 202)
+        with closing(connect(self.database)) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM support_commands WHERE kind='cancel'").fetchone()[0], 1)
+
+    def test_stop_only_cancels_the_owned_demo(self):
+        with patch.dict(os.environ, {'ARBY_SUPPORT': 'true'}):
+            bridge = SupportBridge(self.database)
+        bridge.snapshot.update(state='ready', components={'eyes': {'state': 'ready'}})
+        bridge.publish()
+        future = Future()
+        runtime = SimpleNamespace(pending_count=0, visual=SimpleNamespace(phase='idle'), cancel_ambient=Mock(return_value=True))
+        bridge.tick(runtime, None, SimpleNamespace(last_error=None), None, lambda action: future)
+        enqueue('eyes', self.database)
+        bridge.next_poll = 0
+        bridge.tick(runtime, None, SimpleNamespace(last_error=None), None, lambda action: future)
+        enqueue('cancel', self.database)
+        bridge.next_poll = 0
+        bridge.tick(runtime, None, SimpleNamespace(last_error=None), None, lambda action: None)
+        runtime.cancel_ambient.assert_called_once_with(future)
+
     def test_system_failure_has_no_subprocess_output_or_password(self):
         with patch('libraries.support.server.subprocess.run', return_value=SimpleNamespace(returncode=1, stdout='secret', stderr='password')):
             with self.assertRaises(ValueError) as caught:
@@ -230,3 +272,9 @@ class HelperTests(unittest.TestCase):
 
     def test_nmcli_escaped_ssid_fields(self):
         self.assertEqual(self.helper.split_fields(r'Fair\: Booth:80:WPA2'), ['Fair: Booth', '80', 'WPA2'])
+
+    def test_shutdown_schedules_fixed_poweroff(self):
+        with patch.object(self.helper, 'run') as run:
+            result = self.helper.execute({'action': 'shutdown'})
+        self.assertTrue(result['ok'])
+        self.assertEqual(run.call_args.args[0], ['/usr/bin/systemd-run', '--on-active=3s', '/usr/bin/systemctl', 'poweroff'])

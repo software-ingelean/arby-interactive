@@ -236,6 +236,34 @@ class RuntimeTests(unittest.TestCase):
             validate_reply(reply)
 
 
+class SupportVisualTests(unittest.TestCase):
+    def test_light_demo_preserves_color_and_cancels_only_its_future(self):
+        from concurrent.futures import Future
+        from libraries.core.arby_ambient import AmbientAction
+        started = threading.Event()
+        runtime = ArbyRuntime(FakeBot(), FakeTTS(), emotion_colors=PALETTE,
+                              minimum_display=0, play_ambient_clip=lambda *args: None)
+        original = runtime._set_visual
+        def visual(state, color, phase):
+            original(state, color, phase)
+            if phase == 'speaking':
+                started.set()
+        runtime._set_visual = visual
+        runtime.start()
+        self.addCleanup(runtime.close)
+        future = runtime.try_submit_ambient(AmbientAction('lights', 'default', duration_seconds=3, color=(255, 0, 0)))
+        self.assertTrue(started.wait(1))
+        self.assertEqual(runtime.visual.color, (255, 0, 0))
+        self.assertFalse(runtime.capture_blocked)
+        self.assertFalse(runtime.cancel_ambient(Future()))
+        self.assertTrue(runtime.cancel_ambient(future))
+        with self.assertRaises(CancelledError):
+            future.result(timeout=1)
+        runtime._queue.join()
+        self.assertEqual(runtime.visual.phase, 'idle')
+
+
+
 class FakePixels(MemoryPixels):
     def __init__(self, count):
         super().__init__(count)

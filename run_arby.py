@@ -12,6 +12,7 @@ import sqlite3
 import threading
 import time
 
+from libraries.audio.arby_devices import load_selection, apply_selection
 from libraries.core.arby_support import SupportBridge, load_overrides, CONTROLS
 from dataclasses import asdict
 from libraries.core.arby_env import load_environment
@@ -111,12 +112,6 @@ def load_config():
     if str(mic_values["device"]).isdigit():
         mic_values["device"] = int(mic_values["device"])
     config.microphone = SimpleNamespace(**mic_values)
-    if config.audio_recover_on_exit and (
-        config.audio_driver != "alsa" or
-        config.audio_device != "plughw:CARD=Headphones,DEV=0"
-    ):
-        raise ValueError("ARBY_AUDIO_RECOVER_ON_EXIT requiere ARBY_AUDIO_DRIVER=alsa y "
-                         "ARBY_AUDIO_DEVICE=plughw:CARD=Headphones,DEV=0.")
     if not 0 < config.model_cooldown_seconds < float("inf"):
         raise ValueError("ARBY_MODEL_COOLDOWN_SECONDS debe ser positivo y finito.")
     if not 0 < config.bot_timeout < float("inf"):
@@ -132,6 +127,8 @@ def load_config():
         raise ValueError("Revisa ARBY_STRIP_GPIO (>=0), ARBY_STRIP_LEDS (>0) y ARBY_STRIP_BRIGHTNESS (0–100).")
     if not 1 <= config.matrix_brightness <= 100:
         raise ValueError("ARBY_MATRIX_BRIGHTNESS debe estar entre 1 y 100.")
+    config.audio_selection = load_selection()
+    config.audio_active = apply_selection(config, config.audio_selection)
     return config
 
 
@@ -205,8 +202,10 @@ def main():
             ambient_settings = load_ambient_settings()
             support.snapshot['effective'] = {
                 'ambient': asdict(ambient_settings),
+                'audio': args.audio_selection,
                 'controls': {key: (getattr(args, key) if key != 'rate' else args.rate or '+12%') for key in CONTROLS},
             }
+            support.snapshot['audio_active'] = args.audio_active
             support.snapshot['capabilities'] = {'eyes': args.eyes != 'none', 'strip': args.strip,
                                                 'microphone': args.input_mode == 'voice', 'speaker': not args.mute}
             support.snapshot['components'] = {

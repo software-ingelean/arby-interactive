@@ -1,25 +1,104 @@
 <!doctype html>
 <html lang="es">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Arby · Soporte</title><link rel="stylesheet" href="/static/portal.css"><script src="/static/portal.js" defer></script></head>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Arby · Centro de soporte</title>
+  <link rel="stylesheet" href="/static/portal.css">
+  <script src="/static/portal.js" defer></script>
+</head>
 <body>
-<header><a class="brand" href="/" aria-label="Arby soporte"><span class="leaf">a</span><span>arby<small>Soporte en feria</small></span></a><div class="header-right"><span id="connection">Portal local</span><button id="logout" class="quiet" hidden>Cerrar sesión</button></div></header>
-<main>
-<section id="login" class="login" hidden><p class="eyebrow">BIENVENIDO AL EQUIPO</p><h1>Todo listo para<br>conversar.</h1><p>Revisa y configura a Arby desde aquí.</p><form id="login-form"><label for="password">Clave de soporte</label><input id="password" type="password" autocomplete="current-password" required maxlength="256"><button type="submit">Entrar al panel</button></form><p class="hint">Usa la clave entregada al equipo de la feria.</p></section>
-<div id="portal" hidden>
-<div class="intro"><div><p class="eyebrow">PANEL DE CONTROL</p><h1>¿Cómo está Arby?</h1><p>Lo esencial para acompañarte durante la feria.</p></div><span id="mode-label" class="pill">Consultando estado</span></div>
-<div id="summary" class="summary" role="status">Conectando con Arby…</div>
-<nav aria-label="Secciones"><a href="#equipment">Estado</a><a href="#configuration">Configuración</a><a href="#network">Internet</a><a href="#recovery">Recuperación</a></nav>
-<section id="equipment"><div class="section-title"><h2>Equipo y componentes</h2><span id="updated" class="hint"></span></div><div id="components" class="cards"></div><div class="activity"><span id="mic-activity">Micrófono: sin datos</span><span id="touch-activity">Trill: sin toques registrados</span></div>
-<div class="testbar"><div><strong>Una comprobación rápida</strong><p>Arby debe estar libre. Escucha el sonido o mira sus ojos.</p></div><div class="actions"><button id="speaker-test" class="secondary">Probar sonido</button><button id="eyes-test" class="secondary">Probar ojos</button></div></div><p id="test-result" class="hint" role="status"></p></section>
-<section id="configuration"><div class="section-title"><h2>Preparar la experiencia</h2><span class="hint">Los cambios se aplican al reiniciar Arby</span></div>
-<form id="settings-form"><div class="settings-grid"><fieldset><legend>Modo de uso</legend><label for="mode">¿Dónde estará Arby?</label><select id="mode"><option value="oficina">Oficina</option><option value="evento">Evento · incluye gestos</option></select><p class="hint">Con la voz activa, Arby reproduce una frase después de cinco minutos sin interacción en ambos modos.</p><div id="intervals"><label>Gestos: intervalo en segundos</label><div class="pair"><label>Mínimo<input id="gesture-min" type="number" min="1" step="1" required></label><label>Máximo<input id="gesture-max" type="number" min="1" step="1" required></label></div><input id="invitation-min" type="hidden"><input id="invitation-max" type="hidden"></div></fieldset>
-<fieldset><legend>Voz y micrófono</legend><label class="check"><input id="voice-on" type="checkbox"> Arby puede hablar</label><label for="rate">Velocidad de voz (%)</label><input id="rate" type="number" min="-50" max="100" step="1" required><p class="hint">0 es velocidad normal; un valor mayor hace que hable más rápido.</p><div id="mic-control"><label for="gain">Ganancia del micrófono (dB)</label><input id="gain" type="number" min="-30" max="36" step="0.5" required><p class="hint">Aumenta poco a poco si cuesta escucharte. Mucha ganancia también amplifica el ruido.</p></div></fieldset>
-<fieldset><legend>Iluminación</legend><div id="eyes-control"><label for="matrix-brightness">Brillo de ojos (%)</label><input id="matrix-brightness" type="number" min="1" max="100" step="1" required></div><div id="strip-control"><label for="strip-brightness">Brillo de la tira (%)</label><input id="strip-brightness" type="number" min="0" max="100" step="1" required></div><p id="light-hint" class="hint">Un brillo moderado suele ser más cómodo en interiores.</p></fieldset></div>
-<div class="savebar"><p id="pending">Guardar no interrumpe una conversación.</p><div class="actions"><button type="submit" class="secondary">Guardar ajustes</button><button id="apply" type="button">Aplicar y reiniciar Arby</button></div></div></form></section>
-<section id="network"><div class="section-title"><div><h2>Conexión a internet</h2><p class="hint">Arby usa internet para reconocer voz y generar respuestas.</p></div><button id="refresh-network" class="secondary">Actualizar redes</button></div><p id="network-status">Consulta las redes para comprobar la conexión.</p><form id="wifi-form" class="wifi-form"><div><label for="ssid">Red Wi-Fi para wlan0</label><input id="ssid" list="networks" required maxlength="32" autocomplete="off"><datalist id="networks"></datalist></div><div><label for="wifi-password">Contraseña de la red</label><input id="wifi-password" type="password" autocomplete="off" maxlength="128"></div><button type="submit" class="secondary">Conectar</button></form><p class="hint">Cambiar de red puede desconectar este panel. La recuperación sin conexión se realiza por SSH. La red propia de soporte está pendiente de validar el adaptador.</p></section>
-<section id="recovery" class="recovery"><div><h2>Si algo deja de responder</h2><p>Primero reinicia Arby. Si el problema continúa, reinicia la Raspberry.</p><p class="hint">Estas acciones interrumpen la conversación actual.</p></div><div class="actions"><button id="restart-arby" class="secondary">Reiniciar Arby</button><button id="restart-pi" class="danger">Reiniciar Raspberry</button></div></section>
-<footer>Arby · Herramienta local de soporte <span>Hecha para que la feria siga.</span></footer>
-</div>
-<div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
-<dialog id="confirmation"><form method="dialog"><h2 id="confirm-title">Confirmar acción</h2><p id="confirm-text"></p><div class="actions"><button value="cancel" class="secondary">Cancelar</button><button value="ok">Continuar</button></div></form></dialog>
-</main></body></html>
+  <section id="login" class="login" hidden>
+    <a class="brand" href="/" aria-label="Arby"><img class="brand-logo" src="/assets/arby.webp" alt="Arby" width="1708" height="1318"><small>Centro de soporte</small></a>
+    <p class="eyebrow">EL EQUIPO DETRÁS DE LA EXPERIENCIA</p>
+    <h1>Todo listo para conversar.</h1>
+    <p>Un lugar para cuidar de Arby durante la feria.</p>
+    <form id="login-form">
+      <label for="password">Clave de soporte</label>
+      <input id="password" type="password" autocomplete="current-password" required maxlength="256">
+      <button type="submit">Entrar al panel <span aria-hidden="true">↗</span></button>
+    </form>
+    <p class="hint">Acceso para el personal de la feria.</p>
+  </section>
+
+  <div id="portal" class="app-shell" hidden>
+    <aside class="sidebar">
+      <a class="brand" href="#overview"><img class="brand-logo" src="/assets/arby.webp" alt="Arby" width="1708" height="1318"><small>Centro de soporte</small></a>
+      <p class="nav-label">TU ESPACIO DE CONTROL</p>
+      <nav aria-label="Secciones del panel">
+        <a href="#overview" data-nav="overview"><span aria-hidden="true">◉</span> Resumen</a>
+        <a href="#audio" data-nav="audio"><span aria-hidden="true">♫</span> Audio y dispositivos</a>
+        <a href="#experience" data-nav="experience"><span aria-hidden="true">✧</span> Experiencia</a>
+        <a href="#tests" data-nav="tests"><span aria-hidden="true">▷</span> Pruebas y demos</a>
+        <a href="#network" data-nav="network"><span aria-hidden="true">⌁</span> Conexión</a>
+        <a href="#system" data-nav="system"><span aria-hidden="true">⏻</span> Equipo y energía</a>
+      </nav>
+      <div class="sidebar-bottom"><span class="online-dot"></span><span id="connection">Conectando al portal…</span><p>Herramientas sencillas.<br>Una feria que sigue.</p><button id="logout" class="quiet">Cerrar sesión</button></div>
+    </aside>
+
+    <main>
+      <header class="topbar"><span class="eyebrow">SOPORTE EN FERIA</span><span id="mode-label" class="pill">Consultando modo</span></header>
+      <div class="page-heading"><div><h1 id="page-title">¿Cómo está Arby?</h1><p id="page-description">Todo lo esencial, de un vistazo.</p></div><span id="updated" class="hint"></span></div>
+      <div id="summary" class="summary" role="status">Conectando con Arby…</div>
+
+      <section data-view="overview" id="view-overview">
+        <div class="section-title"><h2>Equipo y componentes</h2><a class="text-link" href="#tests">Hacer una prueba ↗</a></div>
+        <div id="components" class="cards"></div>
+        <div class="overview-bottom">
+          <article class="panel"><p class="eyebrow">ESCUCHA Y CONTACTO</p><h2>Actividad en tiempo real</h2><div class="meter-row"><label for="overview-meter">Nivel del micrófono</label><meter id="overview-meter" min="0" max="100" value="0">0</meter></div><p id="mic-activity">Micrófono: sin datos</p><p id="touch-activity">Trill: sin toques registrados</p><a class="text-link" href="#audio">Revisar dispositivos ↗</a></article>
+          <article class="panel accent-panel"><p class="eyebrow">ANTES DE RECIBIR VISITANTES</p><h2>Una comprobación rápida</h2><p>Escucha un saludo, revisa los ojos y toca los sensores. Un minuto para empezar con tranquilidad.</p><a class="button" href="#tests">Ir a pruebas y demos ↗</a></article>
+        </div>
+      </section>
+
+      <form id="settings-form" novalidate>
+        <section data-view="audio" id="view-audio" hidden>
+          <div class="section-title"><h2>Dispositivos predeterminados</h2><button id="refresh-audio" type="button" class="secondary">↻ Buscar dispositivos</button></div>
+          <p id="audio-discovery" class="hint section-note">Buscando dispositivos de la Raspberry…</p>
+          <div class="two-columns">
+            <fieldset class="panel device-panel"><legend>01 · Micrófono</legend><div class="device-symbol" aria-hidden="true">♫</div><h2>¿Por dónde escucha?</h2><label for="input-device">Dispositivo de entrada</label><select id="input-device"><option value="">Usar configuración instalada</option></select><p id="input-preference" class="device-state">Sin predeterminado seleccionado.</p><p id="input-active" class="hint">En uso: sin confirmar.</p><label for="mic-channel">Canal de captura</label><select id="mic-channel"><option value="left">Izquierdo / mono</option><option value="right">Derecho</option></select><label for="gain">Ganancia del micrófono (dB)</label><input id="gain" type="number" min="-30" max="36" step="0.5" required><p class="hint">Aumenta poco a poco. Mucha ganancia también amplifica el ruido.</p></fieldset>
+            <fieldset class="panel device-panel"><legend>02 · Altavoz</legend><div class="device-symbol" aria-hidden="true">◖</div><h2>¿Por dónde habla?</h2><label for="output-device">Dispositivo de salida</label><select id="output-device"><option value="">Usar configuración instalada</option></select><p id="output-preference" class="device-state">Sin predeterminado seleccionado.</p><p id="output-active" class="hint">En uso: sin confirmar.</p><label class="check"><input id="voice-on" type="checkbox"> Activar la voz de Arby</label><label for="rate">Velocidad de voz (%)</label><input id="rate" type="number" min="-50" max="100" step="1" required><p class="hint">0 es velocidad normal; un valor mayor hace que hable más rápido.</p></fieldset>
+          </div>
+          <div class="callout"><strong>Una elección que Arby recuerda</strong><p>Se guarda la identidad del equipo, no su posición en la lista. Si cambia de número al reiniciar, Arby vuelve a buscarlo. Si no está conectado, te lo indicará.</p><p class="hint">Sin número de serie se distingue primero por puerto y después por modelo, solo si hay una coincidencia única. Conecta el dispositivo y aplica los ajustes para volver a abrir el audio.</p></div>
+          <article class="panel live-audio"><div><h2>¿Está llegando sonido?</h2><p id="audio-mic-activity">Habla cerca del micrófono y observa el nivel.</p></div><meter id="audio-meter" min="0" max="100" value="0">0</meter><a class="text-link" href="#tests">Abrir pruebas ↗</a></article>
+        </section>
+
+        <section data-view="experience" id="view-experience" hidden>
+          <div class="two-columns">
+            <fieldset class="panel"><legend>Comportamiento</legend><h2>El ritmo de la experiencia</h2><label for="mode">Modo de uso</label><select id="mode"><option value="oficina">Oficina · espera a que le hablen</option><option value="evento">Evento · invita a conversar</option></select><p class="hint">En evento hace gestos e invitaciones cuando no está atendiendo a nadie.</p><div id="intervals"><label>Gestos · intervalo en segundos</label><div class="pair"><label for="gesture-min">Mínimo<input id="gesture-min" type="number" min="1" step="any" required></label><label for="gesture-max">Máximo<input id="gesture-max" type="number" min="1" step="any" required></label></div><label>Invitaciones · intervalo en segundos</label><div class="pair"><label for="invitation-min">Mínimo<input id="invitation-min" type="number" min="1" step="any" required></label><label for="invitation-max">Máximo<input id="invitation-max" type="number" min="1" step="any" required></label></div></div></fieldset>
+            <fieldset class="panel"><legend>Iluminación</legend><h2>Una presencia cómoda</h2><div id="eyes-control"><label for="matrix-brightness">Brillo de ojos (%)</label><input id="matrix-brightness" type="number" min="1" max="100" step="1" required></div><div id="strip-control"><label for="strip-brightness">Brillo de la tira (%)</label><input id="strip-brightness" type="number" min="0" max="100" step="1" required></div><p id="light-hint" class="hint">Un brillo moderado suele ser más cómodo en interiores.</p><div class="mini-note">Los controles de cableado y el mapeo OE5 conservan la configuración instalada.</div></fieldset>
+          </div>
+        </section>
+      </form>
+      <div id="savebar" class="savebar" hidden><div><strong id="save-title">Configuración de Arby</strong><p id="pending">Guardar no interrumpe una conversación.</p></div><div class="actions"><button type="submit" form="settings-form" class="secondary">Guardar ajustes</button><button id="apply">Aplicar y reiniciar Arby</button></div></div>
+
+      <section data-view="tests" id="view-tests" hidden>
+        <div class="callout"><strong>Pequeñas pruebas, sin cambiar la configuración</strong><p>Las demostraciones esperan que Arby esté libre. Si alguien empieza a interactuar, se interrumpen para atenderle. Confirma siempre el resultado escuchando o mirando el equipo.</p></div>
+        <div class="section-title"><h2>Voz, expresiones y luces</h2><button id="cancel-test" class="secondary">Detener demostración</button></div>
+        <div id="demo-buttons" class="demo-grid"></div>
+        <div id="test-result" class="test-result" role="status">Elige una prueba para empezar.</div>
+        <div class="two-columns">
+          <article class="panel"><p class="eyebrow">ENTRADA DE AUDIO</p><h2>Comprobar el micrófono</h2><p>Habla cerca del dispositivo. El nivel indica que llega audio, sin guardar grabaciones.</p><meter id="test-meter" min="0" max="100" value="0">0</meter><p id="test-mic-activity" class="hint">Esperando información.</p></article>
+          <article class="panel"><p class="eyebrow">SENSORES TÁCTILES</p><h2>Comprobar Trill</h2><p>Toca suavemente una zona de Arby. Aquí aparecerá el último contacto detectado.</p><div id="test-touch-activity" class="sensor-feedback">Sin toques recientes confirmados.</div></article>
+        </div>
+      </section>
+
+      <section data-view="network" id="view-network" hidden>
+        <article class="panel"><div class="section-title"><div><p class="eyebrow">CONEXIÓN DE LA FERIA</p><h2>Internet para conversar</h2></div><button id="refresh-network" class="secondary">↻ Actualizar redes</button></div><p id="network-status">Consulta las redes para comprobar la conexión.</p><form id="wifi-form" class="wifi-form"><div><label for="ssid">Red Wi-Fi de internet · wlan0</label><input id="ssid" list="networks" required maxlength="32" autocomplete="off"><datalist id="networks"></datalist></div><div><label for="wifi-password">Contraseña de la red</label><input id="wifi-password" type="password" autocomplete="off" maxlength="128"></div><button type="submit">Conectar</button></form></article>
+        <div class="callout"><strong>Dos conexiones, dos funciones</strong><p>La Wi-Fi interna, wlan0, se usa para internet. La red Arby-Soporte del adaptador USB, wlan1, permite entrar al panel cuando está configurada y activa.</p><p class="hint">Esta pantalla cambia únicamente la conexión de internet. Si estás entrando por esa misma red, puedes perder temporalmente el acceso.</p></div>
+      </section>
+
+      <section data-view="system" id="view-system" hidden>
+        <div class="energy-grid">
+          <article class="panel"><span class="energy-symbol" aria-hidden="true">↻</span><h2>Reiniciar Arby</h2><p>Vuelve a iniciar la aplicación y aplica los ajustes guardados. El panel permanece abierto.</p><button id="restart-arby" class="secondary">Reiniciar aplicación</button></article>
+          <article class="panel"><span class="energy-symbol" aria-hidden="true">⟳</span><h2>Reiniciar la Raspberry</h2><p>Reinicia todo el equipo. El panel se desconectará durante el arranque.</p><button id="restart-pi" class="secondary">Reiniciar equipo</button></article>
+          <article class="panel poweroff-panel"><span class="energy-symbol" aria-hidden="true">⏻</span><h2>Apagar con cuidado</h2><p>Finaliza los servicios y apaga el sistema. Para volver a usarlo, habrá que encender la Raspberry físicamente.</p><button id="shutdown-pi" class="danger">Apagar Raspberry</button></article>
+        </div>
+        <div class="callout"><strong>Antes de retirar la alimentación</strong><p>Espera a que el sistema termine de apagarse. Que el panel deje de responder no confirma por sí solo que el apagado haya finalizado.</p></div>
+      </section>
+      <footer>Arby · Centro de soporte <span>Conectado al equipo, cerca de las personas.</span></footer>
+    </main>
+  </div>
+  <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+  <dialog id="confirmation"><form method="dialog"><p class="eyebrow">CONFIRMACIÓN</p><h2 id="confirm-title">Confirmar acción</h2><p id="confirm-text"></p><div class="actions"><button value="cancel" class="secondary">Cancelar</button><button value="ok" id="confirm-ok">Continuar</button></div></form></dialog>
+</body>
+</html>
