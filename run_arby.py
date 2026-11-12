@@ -19,6 +19,7 @@ from libraries.simulation.arby_muted_tts import MutedTTS
 from libraries.preview.arby_preview import Preview
 from libraries.eyes.arby_eyes import EyeAnimator
 from libraries.core.arby_runtime import ArbyRuntime
+from libraries.core.arby_ambient import AmbientAudio, AmbientSequence, load_ambient_settings
 from libraries.leds.arby_strip_led import LedStripController, StripConfig
 
 
@@ -192,6 +193,10 @@ def main():
     stop, input_done = threading.Event(), threading.Event()
     try:
         with ExitStack() as stack:
+            ambient_settings = load_ambient_settings()
+            event_mode = ambient_settings.mode == "evento"
+            ambient = AmbientSequence(ambient_settings) if event_mode else None
+            print(f"Estado: modo {ambient_settings.mode}.", flush=True)
             touch = None
             if args.trill:
                 from libraries.core.arby_touch import TrillReader, TouchReactions, load_touch_config
@@ -233,7 +238,8 @@ def main():
                 from libraries.bot.arby_bot import ArbyBot, BotConfig, EMOTION_COLORS
                 bot = ArbyBot(config=BotConfig(
                     model=args.model or BotConfig().model,
-                    timeout_seconds=args.bot_timeout))
+                    timeout_seconds=args.bot_timeout,
+                    event_mode=event_mode))
                 palette = EMOTION_COLORS
             # Until runtime starts, protect client cleanup during partial startup.
             with ExitStack() as clients:
@@ -252,12 +258,23 @@ def main():
                           f" / device={args.audio_device or os.getenv('AUDIODEV') or 'default'}"
                           " / salida estéreo 48000 Hz", flush=True)
                 clients.callback(tts.close)
-                runtime = ArbyRuntime(bot, tts, emotion_colors=palette).start()
+                ambient_audio = None
+                if event_mode and not args.mute:
+                    ambient_audio = AmbientAudio(
+                        ffplay=args.ffplay, audio_driver=args.audio_driver,
+                        audio_device=args.audio_device,
+                        player_context=getattr(tts, "_player_context", None),
+                    )
+                runtime = ArbyRuntime(
+                    bot, tts, emotion_colors=palette,
+                    play_ambient_clip=ambient_audio.play if ambient_audio else None,
+                ).start()
                 clients.pop_all()  # Ownership is now held by the runtime worker.
             stack.callback(runtime.close)
             eyes = EyeAnimator()
             if touch:
                 print("Estado: Trill activo junto a la conversación; toques con respuestas automáticas.", flush=True)
+            microphone = None
             if args.input_mode == "voice":
                 from libraries.voice_input.arby_microphone import MicrophoneInput
                 microphone = MicrophoneInput(runtime, args.microphone, stop, input_done)
@@ -268,6 +285,9 @@ def main():
                                           name="arby-console", daemon=True)
                 reader.start()
             revision = -1
+            activity_revision = 0
+            submit_ambient = (microphone.try_submit_ambient if microphone is not None
+                              else runtime.try_submit_ambient)
             while not stop.is_set():
                 started = time.monotonic()
                 if touch:
@@ -275,6 +295,11 @@ def main():
                 if preview and preview.requested_stop():
                     stop.set()
                     break
+                if ambient and not input_done.is_set():
+                    busy, current_revision = runtime.visitor_activity
+                    visitor_active = busy or current_revision != activity_revision
+                    activity_revision = current_revision
+                    ambient.tick(started, visitor_active=visitor_active, submit=submit_ambient)
                 visual = runtime.visual
                 if visual.revision != revision:
                     eyes.set_state(visual.matrix_state, color=visual.color, now=started)

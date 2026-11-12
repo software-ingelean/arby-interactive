@@ -8,6 +8,7 @@ import time
 
 from libraries.eyes.arby_eyes import EMOTION_STATES, normalize_state
 from libraries.core.arby_response import normalize_reply, validate_color
+from libraries.core.arby_ambient import AmbientAction
 
 LOGGER = logging.getLogger(__name__)
 IDLE_COLOR = (40, 215, 255)
@@ -30,6 +31,7 @@ class _Request:
     kind: str
     payload: object
     future: Future
+    cancel: threading.Event | None = None
 
 
 class ArbyRuntime:
@@ -39,19 +41,24 @@ class ArbyRuntime:
     bot, speaks, or resets the session. Fixed text bypasses Gemini and history.
     """
 
-    def __init__(self, bot, tts, *, emotion_colors, queue_size=8, minimum_display=0.5):
+    def __init__(self, bot, tts, *, emotion_colors, queue_size=8, minimum_display=0.5,
+                 play_ambient_clip=None):
         if queue_size < 1 or minimum_display < 0:
             raise ValueError("Invalid runtime limits")
         self.bot, self.tts = bot, tts
         self.emotion_colors = dict(emotion_colors)
         self.minimum_display = minimum_display
-        self._queue = Queue(maxsize=queue_size)
+        self._queue_capacity = queue_size
+        self._queue = Queue(maxsize=queue_size + 1)
         self.events = Queue()
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._visual = VisualState()
         self._thread = None
         self._closed = False
+        self._ambient = None
+        self._play_ambient_clip = play_ambient_clip
+        self._activity_revision = 0
 
     @property
     def visual(self):
@@ -62,6 +69,38 @@ class ArbyRuntime:
     def pending_count(self):
         with self._queue.mutex:
             return self._queue.unfinished_tasks
+
+    @property
+    def visitor_activity(self):
+        """Return whether user work is pending and its submission counter."""
+        with self._lock:
+            pending = self.pending_count - int(self._ambient is not None)
+            return pending > 0, self._activity_revision
+
+    @property
+    def capture_blocked(self):
+        """Silent eye gestures can run while the microphone listens."""
+        with self._lock:
+            count = self.pending_count
+            if not count or self._ambient is None or count > 1:
+                return count > 0
+            kind = self._ambient.payload.kind
+            return kind == "phrase" or (kind != "eyes" and self._play_ambient_clip is not None)
+
+    def try_submit_ambient(self, action: AmbientAction):
+        """Admit at most one ambient action and only into an idle runtime."""
+        with self._lock:
+            if self._closed or self._thread is None or self.pending_count:
+                return None
+            request = _Request("ambient", action, Future(), threading.Event())
+            self._ambient = request
+            self._queue.put_nowait(request)
+            return request.future
+
+    def interrupt_ambient(self):
+        with self._lock:
+            if self._ambient is not None:
+                self._ambient.cancel.set()
 
     def _set_visual(self, state, color, phase):
         with self._lock:
@@ -82,9 +121,17 @@ class ArbyRuntime:
                 raise RuntimeError("Runtime must be started and open")
             future = Future()
             try:
+                # Keep a separate slot for the single idle action, so even a
+                # queue_size of one admits a visitor while the action is queued.
+                with self._queue.mutex:
+                    queued_visitors = sum(item.kind != "ambient" for item in self._queue.queue)
+                if queued_visitors >= self._queue_capacity:
+                    raise Full
                 self._queue.put_nowait(_Request(kind, payload, future))
             except Full as exc:
                 raise RuntimeError("La cola está llena; espera a que Arby termine.") from exc
+            self._activity_revision += 1
+            self.interrupt_ambient()
             return future
 
     def submit_text(self, text):
@@ -95,25 +142,27 @@ class ArbyRuntime:
 
     def submit_fixed_phrase(self, text, *, state="alegres", color=None):
         """Future sensor hook. Speak supplied text without a Gemini request."""
+        return self._submit("fixed", self._fixed_reply(text, state, color))
+
+    def _fixed_reply(self, text, state, color=None):
         state = normalize_state(state)
         if state not in EMOTION_STATES:
             raise ValueError("Fixed phrases require an emotion")
         color = validate_color(self.emotion_colors[state] if color is None else color)
         r, g, b = color
-        reply = validate_reply({"matrix_state": state,
+        return validate_reply({"matrix_state": state,
             "strip_led": {"color": {"r": r, "g": g, "b": b}, "mood": state},
             "response": text})
-        return self._submit("fixed", reply)
 
     def reset_session(self):
         return self._submit("reset", None)
 
-    def _speak(self, reply):
+    def _speak(self, reply, cancel=None):
         started = time.monotonic()
         color = validate_color(reply["strip_led"]["color"])
         self._set_visual(reply["matrix_state"], color, "speaking")
         with self._lock:
-            if self._stop.is_set():
+            if self._stop.is_set() or (cancel is not None and cancel.is_set()):
                 raise CancelledError()
             accepted = self.tts.speak(reply["response"])
         if not accepted:
@@ -121,11 +170,38 @@ class ArbyRuntime:
         while not self.tts.wait(0.05):
             if self._stop.is_set():
                 raise CancelledError()
+            if cancel is not None and cancel.is_set():
+                if self.tts.stop() is False:
+                    raise RuntimeError("No se pudo detener la invitación.")
+                raise CancelledError()
         if self.tts.last_error:
             self.events.put(("error", f"TTS: {self.tts.last_error}"))
-        self._stop.wait(max(0, self.minimum_display - (time.monotonic() - started)))
-        if self._stop.is_set():
+        wait_for = cancel if cancel is not None else self._stop
+        wait_for.wait(max(0, self.minimum_display - (time.monotonic() - started)))
+        if self._stop.is_set() or wait_for.is_set():
             raise CancelledError()
+
+    def _run_ambient(self, request):
+        action, cancel = request.payload, request.cancel
+        if cancel.is_set():
+            raise CancelledError()
+        if action.kind == "phrase":
+            reply = self._fixed_reply(action.text, action.matrix_state)
+            self.events.put(("response", reply["response"]))
+            for segment in reply["segments"]:
+                self._speak(segment, cancel)
+            return reply
+        state = normalize_state(action.matrix_state)
+        color = validate_color(self.emotion_colors[state])
+        if action.kind == "eyes" or self._play_ambient_clip is None:
+            self._set_visual(state, color, "idle")
+            cancel.wait(action.duration_seconds or 1.5)
+        else:
+            self._set_visual(state, color, "speaking")
+            self._play_ambient_clip(action.kind, cancel)
+        if cancel.is_set() or self._stop.is_set():
+            raise CancelledError()
+        return None
 
     def _speak_reply(self, reply):
         segments = reply["segments"]
@@ -171,7 +247,9 @@ class ArbyRuntime:
                         continue
                     if self._stop.is_set():
                         raise CancelledError()
-                    if request.kind == "reset":
+                    if request.kind == "ambient":
+                        reply = self._run_ambient(request)
+                    elif request.kind == "reset":
                         self.bot.reset_session()
                         reply = None
                         self.events.put(("info", "Conversación reiniciada."))
@@ -194,12 +272,18 @@ class ArbyRuntime:
                         self.tts.stop()
                     except Exception:
                         LOGGER.warning("Playback cleanup failed")
-                    self.events.put(("error", f"No se completó la solicitud: {type(exc).__name__}"))
+                    if request.kind == "ambient":
+                        self.events.put(("error", f"Acción de evento ({request.payload.kind}): {exc}"))
+                    else:
+                        self.events.put(("error", f"No se completó la solicitud: {type(exc).__name__}"))
                     request.future.set_exception(exc)
                     LOGGER.debug("Request failed", exc_info=True)
                 finally:
-                    self._set_visual("default", IDLE_COLOR, "idle")
-                    self._queue.task_done()
+                    with self._lock:
+                        self._set_visual("default", IDLE_COLOR, "idle")
+                        if request is self._ambient:
+                            self._ambient = None
+                        self._queue.task_done()
         finally:
             self._cancel_pending()
             for client in (self.tts, self.bot):
@@ -215,13 +299,17 @@ class ArbyRuntime:
             except Empty:
                 return
             request.future.cancel()
-            self._queue.task_done()
+            with self._lock:
+                if request is self._ambient:
+                    self._ambient = None
+                self._queue.task_done()
 
     def close(self, timeout=5.0):
         """Stop playback and pending work; an in-flight network call may finish later."""
         with self._lock:
             self._closed = True
             self._stop.set()
+            self.interrupt_ambient()
         self._cancel_pending()
         try:
             self.tts.stop()

@@ -13,15 +13,19 @@ class MicrophoneInput:
         self.resume_at = 0.0
         self.error = None
         self.pipeline = ArbyPipeline(config, on_question=self.submit,
-                                     is_paused=self.is_paused)
+                                     is_paused=self.is_paused,
+                                     on_voice_start=runtime.interrupt_ambient)
         self.thread = threading.Thread(target=self.run, name="arby-microphone", daemon=True)
 
     def is_paused(self):
-        if self.runtime.pending_count:
+        if self.runtime.capture_blocked:
             # Also discard the tail of speaker audio after playback ends.
             self.resume_at = time.monotonic() + 0.35
             return True
         return self.stop.is_set() or time.monotonic() < self.resume_at
+
+    def try_submit_ambient(self, action):
+        return self.pipeline.when_idle(lambda: self.runtime.try_submit_ambient(action))
 
     def submit(self, text):
         if not self.is_paused():

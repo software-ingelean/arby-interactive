@@ -204,66 +204,72 @@ class GoogleWorker(threading.Thread):
                     log("[TIMEOUT] No llegó una pregunta. Esperando 'Arby'.")
                 continue
 
-            if self.stop_event.is_set() or self.is_paused():
-                continue
-            if self.deadline is not None and time.monotonic() > self.deadline:
-                self.mode, self.deadline = "WAKE", None
-            audio = sr.AudioData(pcm, FS_OUT, 2)
-            generation = self.generation()
-            start = time.perf_counter()
-
             try:
-                text = self.recognizer.recognize_google(
-                    audio,
-                    language=self.language,
-                    show_all=False,
-                )
-                elapsed = time.perf_counter() - start
-                log(f"[GOOGLE] {text} | {elapsed:.2f}s")
+                self._recognize(pcm)
+            finally:
+                self.jobs.task_done()
 
-            except sr.UnknownValueError:
-                elapsed = time.perf_counter() - start
-                log(f"[GOOGLE] (no reconocido) | {elapsed:.2f}s")
-                continue
+    def _recognize(self, pcm):
+        if self.stop_event.is_set() or self.is_paused():
+            return
+        if self.deadline is not None and time.monotonic() > self.deadline:
+            self.mode, self.deadline = "WAKE", None
+        audio = sr.AudioData(pcm, FS_OUT, 2)
+        generation = self.generation()
+        start = time.perf_counter()
 
-            except sr.RequestError as exc:
-                elapsed = time.perf_counter() - start
-                log(f"[GOOGLE] Error de servicio/red: {exc} | {elapsed:.2f}s")
-                continue
+        try:
+            text = self.recognizer.recognize_google(
+                audio,
+                language=self.language,
+                show_all=False,
+            )
+            elapsed = time.perf_counter() - start
+            log(f"[GOOGLE] {text} | {elapsed:.2f}s")
 
-            except Exception as exc:
-                log(f"[GOOGLE] Error: {exc}")
-                continue
+        except sr.UnknownValueError:
+            elapsed = time.perf_counter() - start
+            log(f"[GOOGLE] (no reconocido) | {elapsed:.2f}s")
+            return
 
-            if (self.stop_event.is_set() or self.is_paused()
-                    or generation != self.generation()):
-                continue
-            if self.mode == "WAKE":
-                matched, remainder = wake_match(text)
+        except sr.RequestError as exc:
+            elapsed = time.perf_counter() - start
+            log(f"[GOOGLE] Error de servicio/red: {exc} | {elapsed:.2f}s")
+            return
 
-                if matched:
-                    log("[ARBY] ACTIVADO")
+        except Exception as exc:
+            log(f"[GOOGLE] Error: {exc}")
+            return
 
-                    if remainder:
-                        # Si el usuario dijo la activación y la pregunta
-                        # en la misma frase, se conserva la pregunta.
-                        log(f"[PREGUNTA] {remainder}")
-                        self.mode = "WAKE"
-                        self.deadline = None
-                        self.deliver(remainder)
-                    else:
-                        self.mode = "COMMAND"
-                        self.deadline = (
-                            time.monotonic() + self.followup_seconds
-                        )
-                        log("[ARBY] Escuchando tu pregunta...")
+        if (self.stop_event.is_set() or self.is_paused()
+                or generation != self.generation()):
+            return
+        if self.mode == "WAKE":
+            matched, remainder = wake_match(text)
 
-            else:
-                log(f"[PREGUNTA] {text}")
-                self.mode = "WAKE"
-                self.deadline = None
-                self.deliver(text)
-                log("[READY] Esperando 'Arby'.")
+            if matched:
+                log("[ARBY] ACTIVADO")
+
+                if remainder:
+                    # Si el usuario dijo la activación y la pregunta
+                    # en la misma frase, se conserva la pregunta.
+                    log(f"[PREGUNTA] {remainder}")
+                    self.mode = "WAKE"
+                    self.deadline = None
+                    self.deliver(remainder)
+                else:
+                    self.mode = "COMMAND"
+                    self.deadline = (
+                        time.monotonic() + self.followup_seconds
+                    )
+                    log("[ARBY] Escuchando tu pregunta...")
+
+        else:
+            log(f"[PREGUNTA] {text}")
+            self.mode = "WAKE"
+            self.deadline = None
+            self.deliver(text)
+            log("[READY] Esperando 'Arby'.")
 
     def deliver(self, text):
         if self.on_question is not None and not self.stop_event.is_set():
@@ -274,12 +280,16 @@ class GoogleWorker(threading.Thread):
 
 
 class ArbyPipeline:
-    def __init__(self, args, *, on_question=None, is_paused=None):
+    def __init__(self, args, *, on_question=None, is_paused=None, on_voice_start=None):
         self.args = args
         self.is_paused = is_paused or (lambda: False)
         self.max_utterance_seconds = getattr(args, "max_utterance_seconds", 15.0)
         self.stop_event = threading.Event()
         self.generation = 0
+        self._activity_lock = threading.RLock()
+        self._capturing_voice = False
+        self._ready = threading.Event()
+        self._on_voice_start = on_voice_start
 
         self.capture_q = queue.Queue(maxsize=args.queue_blocks)
         self.google_q = queue.Queue(maxsize=1)
@@ -317,6 +327,25 @@ class ArbyPipeline:
             request_timeout=getattr(args, "request_timeout", 10.0),
             generation=lambda: self.generation,
         )
+
+    @property
+    def visitor_active(self):
+        """Cover VAD, queued/in-flight recognition and the wake follow-up."""
+        with self._activity_lock:
+            if not self._ready.is_set() or self._capturing_voice:
+                return True
+            with self.google_q.mutex:
+                if self.google_q.unfinished_tasks:
+                    return True
+            deadline = self.google_worker.deadline
+            return deadline is not None and time.monotonic() < deadline
+
+    def when_idle(self, callback):
+        """Check capture and reserve the runtime under the same lock as VAD."""
+        with self._activity_lock:
+            if self.visitor_active or self.is_paused():
+                return None
+            return callback()
 
     def callback(self, indata, frames, time_info, status):
         if self.stop_event.is_set() or self.is_paused():
@@ -364,6 +393,9 @@ class ArbyPipeline:
 
             if not in_speech and event is not None and "start" in event:
                 utterance_state["active"] = True
+                self._capturing_voice = True
+                if self._on_voice_start is not None:
+                    self._on_voice_start()
                 utterance_state["parts"] = list(preroll)
                 utterance_state["parts"].append(frame_bytes)
                 log("[VAD] Inicio de voz")
@@ -396,6 +428,7 @@ class ArbyPipeline:
                         log("[WARN] Cola Google llena; segmento descartado")
 
                 self.vad.reset_states()
+                self._capturing_voice = False
 
             preroll.append(frame_bytes)
 
@@ -404,6 +437,8 @@ class ArbyPipeline:
             while True:
                 try:
                     pending.get_nowait()
+                    if pending is self.google_q:
+                        pending.task_done()
                 except queue.Empty:
                     break
 
@@ -470,6 +505,7 @@ class ArbyPipeline:
                 latency="low",
                 callback=self.callback,
             ):
+                self._ready.set()
                 log("[READY] Di 'Arby'.")
                 paused = False
                 while not self.stop_event.is_set():
@@ -481,6 +517,8 @@ class ArbyPipeline:
                         vad_buffer.clear()
                         preroll.clear()
                         utterance_state.update(active=False, parts=[])
+                        with self._activity_lock:
+                            self._capturing_voice = False
                         self.stop_event.wait(0.03)
                         continue
                     if paused:
@@ -515,12 +553,11 @@ class ArbyPipeline:
                             np.clip(output, -1.0, 0.999969) * 32768.0
                         ).astype("<i2").tobytes()
 
-                        self.process_vad_audio(
-                            pcm16,
-                            vad_buffer,
-                            preroll,
-                            utterance_state,
-                        )
+                        with self._activity_lock:
+                            if not self.is_paused():
+                                self.process_vad_audio(
+                                    pcm16, vad_buffer, preroll, utterance_state,
+                                )
 
                     elapsed = time.perf_counter() - t0
                     total_proc += elapsed
@@ -552,6 +589,7 @@ class ArbyPipeline:
                         last_report = now
 
         finally:
+            self._ready.clear()
             self.stop_event.set()
 
             if self.google_worker.is_alive():
