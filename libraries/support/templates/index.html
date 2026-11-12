@@ -22,7 +22,10 @@
   </section>
 
   <div id="portal" class="app-shell" hidden>
-    <aside class="sidebar">
+    <div class="mobile-header"><button id="menu-open" type="button" class="secondary" aria-label="Abrir menú de secciones" aria-controls="portal-sidebar" aria-expanded="false">☰ <span>Menú</span></button><span>Arby · Soporte</span></div>
+    <div id="menu-backdrop" class="menu-backdrop" hidden></div>
+    <aside id="portal-sidebar" class="sidebar" aria-label="Menú de soporte">
+      <button id="menu-close" class="menu-close quiet" type="button" aria-label="Cerrar menú">✕</button>
       <a class="brand" href="#overview"><img class="brand-logo" src="/assets/arby.webp" alt="Arby" width="1708" height="1318"><small>Centro de soporte</small></a>
       <p class="nav-label">TU ESPACIO DE CONTROL</p>
       <nav aria-label="Secciones del panel">

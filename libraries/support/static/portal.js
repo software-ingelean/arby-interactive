@@ -17,6 +17,45 @@ let audioDraft = {input: null, output: null}, audioInventory = null;
 let audioChecked = 0;
 let demoCatalog = [], networkLoaded = false, powerMessage = '', powerUntil = 0;
 
+const mobileMenu = window.matchMedia('(max-width: 760px)');
+function setMenu(open, restoreFocus = true) {
+  open = open && mobileMenu.matches;
+  document.body.classList.toggle('menu-open', open);
+  $('menu-open').setAttribute('aria-expanded', String(open));
+  $('menu-backdrop').hidden = !open;
+  const sidebar = $('portal-sidebar');
+  sidebar.inert = mobileMenu.matches && !open;
+  document.querySelector('main').inert = open;
+  document.querySelector('.mobile-header').inert = open;
+  if (open) {
+    sidebar.setAttribute('role', 'dialog');
+    sidebar.setAttribute('aria-modal', 'true');
+    $('menu-close').focus();
+  } else {
+    sidebar.removeAttribute('role');
+    sidebar.removeAttribute('aria-modal');
+    if (restoreFocus && mobileMenu.matches) $('menu-open').focus();
+  }
+}
+$('menu-open').addEventListener('click', () => setMenu(true));
+$('menu-close').addEventListener('click', () => setMenu(false));
+$('menu-backdrop').addEventListener('click', () => setMenu(false));
+document.querySelectorAll('[data-nav], .sidebar .brand').forEach(link => {
+  link.addEventListener('click', () => setMenu(false));
+});
+document.addEventListener('keydown', event => {
+  if (!document.body.classList.contains('menu-open')) return;
+  if (event.key === 'Escape') setMenu(false);
+  if (event.key === 'Tab') {
+    const items = [...$('portal-sidebar').querySelectorAll('a[href], button:not(:disabled)')];
+    const first = items[0], last = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
+});
+mobileMenu.addEventListener('change', () => setMenu(false, false));
+setMenu(false, false);
+
 function notice(message, error = false) {
   $('notice').textContent = message;
   $('notice').classList.toggle('error', error);
@@ -46,6 +85,7 @@ async function api(url, method = 'GET', data) {
 }
 
 function showLogin() {
+  setMenu(false, false);
   clearInterval(timer);
   $('login').hidden = false;
   $('portal').hidden = true;
