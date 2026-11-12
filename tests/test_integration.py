@@ -262,6 +262,17 @@ class RuntimeTests(unittest.TestCase):
         self.assertFalse(future.retry_requested)
         self.assertEqual(bot.calls, ['valid question'])
 
+    def test_reported_tts_failure_is_not_a_successful_repeat_prompt(self):
+        from libraries.core.arby_response import EMOTION_COLORS
+        tts = FakeTTS()
+        tts.last_error = 'synthesis failed'
+        runtime = ArbyRuntime(FakeBot(), tts, emotion_colors=EMOTION_COLORS, minimum_display=0).start()
+        self.addCleanup(runtime.close)
+        future = runtime.submit_fixed_phrase(REPEAT_QUESTION, state='duda')
+        with self.assertRaisesRegex(RuntimeError, 'reproducir'):
+            future.result(timeout=1)
+        self.assertEqual(tts.spoken, [REPEAT_QUESTION])
+
     def test_close_cancels_pending_and_prevents_late_speech(self):
         entered, release = threading.Event(), threading.Event()
         bot = FakeBot()

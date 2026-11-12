@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import collections
 from concurrent.futures import Future
+from dataclasses import dataclass
 import queue
 import re
 import signal
@@ -39,7 +40,8 @@ S32_SCALE = 2_147_483_648.0
 
 VAD_FRAME = 512
 VAD_FRAME_BYTES = VAD_FRAME * 2
-MAX_RECOVERY_ATTEMPTS = 2
+CONVERSATION_IDLE_SECONDS = 60.0
+REPEAT_COOLDOWN_SECONDS = 8.0
 
 
 def log(*args):
@@ -158,6 +160,13 @@ def wake_match(text: str):
     return False, ""
 
 
+@dataclass(frozen=True)
+class SpeechSegment:
+    pcm: bytes
+    started_at: float
+    generation: int
+
+
 class GoogleWorker(threading.Thread):
     """Realiza las consultas de Google fuera del hilo de captura."""
 
@@ -172,6 +181,7 @@ class GoogleWorker(threading.Thread):
         request_timeout=10.0,
         generation=None,
         on_unrecognized=None,
+        capture_started_at=None,
     ):
         super().__init__(daemon=True)
         self.jobs = jobs
@@ -182,10 +192,10 @@ class GoogleWorker(threading.Thread):
         self.on_unrecognized = on_unrecognized
         self.repeat_prompt = None
         self.answer_future = None
-        self.retry_count = 0
-        self.timeout_prompted = False
+        self.last_repeat_at = float('-inf')
         self.is_paused = is_paused or (lambda: False)
         self.generation = generation or (lambda: 0)
+        self.capture_started_at = capture_started_at or (lambda: None)
 
         self.recognizer = sr.Recognizer()
         self.recognizer.operation_timeout = request_timeout
@@ -193,22 +203,13 @@ class GoogleWorker(threading.Thread):
         self.deadline = None
 
     def run(self):
-        last_generation = self.generation()
         while not self.stop_event.is_set():
-            current_generation = self.generation()
-            if current_generation != last_generation:
-                self.mode, self.deadline = "WAKE", None
-                last_generation = current_generation
+            # Capture generations invalidate old audio, not an active conversation.
             self._resume_followup()
+            self._expire_followup()
             try:
                 pcm = self.jobs.get(timeout=0.2)
             except queue.Empty:
-                if (
-                    self.mode == "COMMAND"
-                    and self.deadline
-                    and time.monotonic() > self.deadline
-                ):
-                    self._expire_followup()
                 continue
 
             try:
@@ -217,67 +218,105 @@ class GoogleWorker(threading.Thread):
                 self.jobs.task_done()
 
     def _resume_followup(self):
-        # The generation changes while speakers play; reopen only after playback
-        # AND the microphone's echo-tail pause, never from a Future callback.
+        # Reopen only after playback AND the speaker-tail pause. Slow model calls
+        # and speech do not consume the visitor's minute to ask another question.
         if self.stop_event.is_set() or self.is_paused():
             return
         prompt = self.repeat_prompt
         if prompt is not None:
             if prompt.done():
                 self.repeat_prompt = None
-                if not prompt.cancelled():
-                    self._listen_for_command()
+                self.last_repeat_at = time.monotonic()
+                if prompt.cancelled():
+                    log('[REPETIR] Aviso cancelado.')
+                else:
+                    error = prompt.exception()
+                    if error is not None:
+                        log(f'[REPETIR] No se pudo reproducir el aviso ({type(error).__name__}); revisa audio y grabaciones locales.')
+                    else:
+                        log('[REPETIR] Aviso terminado; vuelve a escuchar.')
+                    # Give time to repeat if a long STT/TTS operation crossed the
+                    # deadline, but noise reminders never renew the full minute.
+                    grace = min(CONVERSATION_IDLE_SECONDS, max(0, self.followup_seconds))
+                    self.deadline = max(self.deadline or 0, time.monotonic() + grace)
+                    self.mode = 'COMMAND'
             return
         answer = self.answer_future
         if answer is not None and answer.done():
             self.answer_future = None
-            if (not answer.cancelled() and getattr(answer, 'retry_requested', False)
-                    and self.retry_count < MAX_RECOVERY_ATTEMPTS):
-                self.retry_count += 1
+            if not answer.cancelled():
+                if answer.exception() is not None:
+                    log('[CONVERSACION] La respuesta terminó con error; la escucha continúa.')
                 self._listen_for_command()
 
     def _request_repeat(self, generation):
-        """Only address an activated visitor; cap feedback to avoid noise loops."""
-        if (self.mode != 'COMMAND' or self.on_unrecognized is None
-                or self.stop_event.is_set() or self.is_paused()
-                or generation != self.generation()):
+        """Keep the session alive; throttle prompts instead of permanently capping them."""
+        if self.stop_event.is_set():
+            log('[REPETIR] Omitido: el micrófono se está cerrando.')
             return
-        self.mode, self.deadline = 'WAKE', None
-        if self.retry_count >= MAX_RECOVERY_ATTEMPTS:
-            log("[ARBY] Fin de reintentos. Esperando 'Arby'.")
+        if generation != self.generation():
+            log('[REPETIR] Omitido: audio anterior a una pausa.')
+            return
+        if self.is_paused():
+            log('[REPETIR] Omitido: Arby está ocupado o evitando eco del altavoz.')
+            return
+        if self.mode != 'COMMAND':
+            log("[REPETIR] Omitido: esperando 'Arby'; no hay conversación activa.")
+            return
+        if self.on_unrecognized is None:
+            log('[REPETIR] Omitido: no hay salida de avisos configurada.')
+            return
+        if self.repeat_prompt is not None:
+            log('[REPETIR] Omitido: ya hay un aviso en curso.')
+            return
+        if time.monotonic() - self.last_repeat_at < REPEAT_COOLDOWN_SECONDS:
+            log('[REPETIR] Omitido: pausa breve entre avisos; la conversación sigue activa.')
             return
         try:
             prompt = self.on_unrecognized()
         except (ValueError, RuntimeError) as exc:
-            log(f'[ARBY] No se pudo pedir repetición: {type(exc).__name__}')
+            log(f'[REPETIR] No se pudo solicitar el aviso ({type(exc).__name__}).')
             return
         if isinstance(prompt, Future):
-            self.retry_count += 1
+            self.last_repeat_at = time.monotonic()
             self.repeat_prompt = prompt
+            log('[REPETIR] Aviso solicitado: Perdón, no te escuché bien. ¿Me lo repites?')
+        else:
+            log('[REPETIR] No se pudo encolar el aviso; revisa si Arby está ocupado.')
 
-    def _expire_followup(self):
-        # Silence after an activation gets one reminder, not repeated announcements.
-        if not self.timeout_prompted:
-            self.timeout_prompted = True
-            self._request_repeat(self.generation())
-        self.mode, self.deadline = 'WAKE', None
-        log("[TIMEOUT] No llegó una pregunta. Esperando repetición o 'Arby'.")
+    def _expire_followup(self, at=None):
+        if at is None:
+            # Finish an utterance that began inside the minute even if STT runs
+            # after the boundary. Waiting segments carry their own start time.
+            started = self.capture_started_at()
+            if (self.jobs.unfinished_tasks or (started is not None and self.deadline is not None
+                                               and started < self.deadline)):
+                return
+        if (self.mode == 'COMMAND' and self.deadline is not None
+                and self.repeat_prompt is None and self.answer_future is None
+                and (time.monotonic() if at is None else at) >= self.deadline):
+            self.mode, self.deadline = 'WAKE', None
+            log("[CONVERSACION] Terminó la ventana de escucha. Esperando 'Arby'.")
 
     def _listen_for_command(self):
-        self.mode = "COMMAND"
-        self.deadline = time.monotonic() + self.followup_seconds
-        log("[ARBY] Escuchando tu pregunta...")
+        self.mode = 'COMMAND'
+        self.deadline = time.monotonic() + CONVERSATION_IDLE_SECONDS
+        self.last_repeat_at = float('-inf')
+        log('[CONVERSACION] Activa durante 60 s; puedes preguntar sin decir Arby.')
 
     def _recognize(self, pcm):
         if self.stop_event.is_set() or self.is_paused():
             return
         self._resume_followup()
-        if self.repeat_prompt is not None or (self.answer_future is not None and not self.answer_future.done()):
+        segment = pcm if isinstance(pcm, SpeechSegment) else None
+        if segment is not None and segment.generation != self.generation():
+            log('[GOOGLE] Segmento descartado: audio anterior a una pausa.')
             return
-        if self.deadline is not None and time.monotonic() > self.deadline:
-            self._expire_followup()
-            if self.repeat_prompt is not None:
-                return
+        self._expire_followup(at=segment.started_at if segment else time.monotonic())
+        if segment is not None:
+            pcm = segment.pcm
+        if self.repeat_prompt is not None or self.answer_future is not None:
+            return
         audio = sr.AudioData(pcm, FS_OUT, 2)
         generation = self.generation()
         start = time.perf_counter()
@@ -295,7 +334,7 @@ class GoogleWorker(threading.Thread):
 
         except sr.UnknownValueError:
             elapsed = time.perf_counter() - start
-            log(f"[GOOGLE] (no reconocido) | {elapsed:.2f}s")
+            log(f"[GOOGLE] (no reconocido) | {elapsed:.2f}s | estado={self.mode}")
             self._request_repeat(generation)
             return
 
@@ -313,30 +352,19 @@ class GoogleWorker(threading.Thread):
         if (self.stop_event.is_set() or self.is_paused()
                 or generation != self.generation()):
             return
-        if self.mode == "WAKE":
-            matched, remainder = wake_match(text)
-
-            if matched:
-                self.retry_count = 0
-                self.timeout_prompted = False
-                log("[ARBY] ACTIVADO")
-
-                if remainder:
-                    # Si el usuario dijo la activación y la pregunta
-                    # en la misma frase, se conserva la pregunta.
-                    log(f"[PREGUNTA] {remainder}")
-                    self.mode = "WAKE"
-                    self.deadline = None
-                    self.deliver(remainder)
-                else:
-                    self._listen_for_command()
-
-        else:
-            log(f"[PREGUNTA] {text}")
-            self.mode = "WAKE"
-            self.deadline = None
+        matched, remainder = wake_match(text)
+        # During an active conversation, mentioning Arby inside a question is
+        # ordinary speech. Strip the name only when it starts the utterance.
+        leading_wake = bool(re.match(r'^\W*(?:arby|arbi|barbie|army|aby|abby)\b', text, re.IGNORECASE))
+        if matched and (self.mode == 'WAKE' or leading_wake):
+            log('[ARBY] ACTIVADO')
+            self._listen_for_command()
+            if remainder:
+                log(f'[PREGUNTA] {remainder}')
+                self.deliver(remainder)
+        elif self.mode == 'COMMAND':
+            log(f'[PREGUNTA] {text}')
             self.deliver(text)
-            log("[READY] Esperando 'Arby'.")
 
     def deliver(self, text):
         if self.on_question is not None and not self.stop_event.is_set():
@@ -344,8 +372,13 @@ class GoogleWorker(threading.Thread):
                 future = self.on_question(text)
                 if isinstance(future, Future):
                     self.answer_future = future
+                    self.deadline = None
+                    log('[CONVERSACION] Esperando respuesta; el minuto comienza al terminar el audio.')
+                else:
+                    # Synchronous consumers (including the standalone diagnostic).
+                    self._listen_for_command()
             except (ValueError, RuntimeError) as exc:
-                log(f"[ARBY] {exc}")
+                log(f'[ARBY] No se pudo enviar la pregunta: {type(exc).__name__}')
 
 
 class ArbyPipeline:
@@ -358,6 +391,7 @@ class ArbyPipeline:
         self.generation = 0
         self._activity_lock = threading.RLock()
         self._capturing_voice = False
+        self._voice_started_at = None
         self.input_level = 0.0
         self._capture_channel = 0
         self.last_audio_at = 0.0
@@ -400,6 +434,7 @@ class ArbyPipeline:
             is_paused=self.is_paused,
             request_timeout=getattr(args, "request_timeout", 10.0),
             generation=lambda: self.generation,
+            capture_started_at=lambda: self._voice_started_at if self._capturing_voice else None,
         )
 
     @property
@@ -473,6 +508,7 @@ class ArbyPipeline:
 
             if not in_speech and event is not None and "start" in event:
                 utterance_state["active"] = True
+                self._voice_started_at = time.monotonic()
                 self._capturing_voice = True
                 if self._on_voice_start is not None:
                     self._on_voice_start()
@@ -498,7 +534,7 @@ class ArbyPipeline:
 
                 if duration >= 0.20:
                     try:
-                        self.google_q.put_nowait(utterance)
+                        self.google_q.put_nowait(SpeechSegment(utterance, self._voice_started_at, self.generation))
                         log(
                             "[VAD] Fin de voz; enviado a Google "
                             f"({duration:.2f}s)"

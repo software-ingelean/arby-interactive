@@ -415,25 +415,44 @@ memoria y latencia; al llegar al límite se envía ese segmento al reconocimient
 Ctrl+C, SIGTERM y el cierre de la ventana detienen también la captura.
 
 
-## Recuperación de preguntas por voz
+## Conversación continua y recuperación por voz
 
-Después de activar a Arby, si Google STT devuelve audio no reconocido, texto vacío,
-un error de servicio o agota la espera de red, Arby dice «Perdón, no te escuché bien.
-¿Me lo repites?». Si se activa pero no llega una pregunta, recuerda una sola vez que
-la está esperando. El ruido sin una activación reconocida no genera avisos hablados.
+Decir «Arby» abre una conversación de 60 segundos. Después de cada respuesta,
+correcta o de error, el minuto vuelve a empezar cuando termina la reproducción y
+la pausa de protección contra eco. Durante ese minuto se pueden hacer preguntas
+sin volver a decir el nombre. Las consultas al modelo y la reproducción no
+consumen el tiempo disponible para la siguiente pregunta.
+
+Al cumplirse el minuto sin otra intervención se vuelve a esperar «Arby», sin
+anuncios por silencio. Si se empieza a hablar dentro del plazo, la pregunta se
+acepta aunque termine de capturarse después. Los cambios de generación del audio
+siguen descartando resultados anteriores a una pausa, pero ya no cierran la sesión.
+
+Dentro de una conversación activa, si Google STT devuelve audio no reconocido,
+texto vacío, un error de servicio o agota la espera de red, Arby dice «Perdón, no te
+escuché bien. ¿Me lo repites?». Los avisos no se agotan después de dos errores: se
+separan al menos ocho segundos desde el final del aviso anterior. La conversación
+sigue activa durante esa pausa. El ruido sin una activación reconocida no produce
+avisos hablados.
+
+Las peticiones de repetición no renuevan otro minuto completo indefinidamente:
+conservan el plazo de la conversación y garantizan el margen mínimo de
+`ARBY_MIC_FOLLOWUP_SECONDS` después del aviso (ocho segundos por defecto). Este
+ajuste no acorta la conversación principal de 60 segundos; los perfiles existentes
+con `ARBY_MIC_FOLLOWUP_SECONDS=8` no necesitan cambiarse.
+
+El registro distingue el estado `COMMAND` (conversación activa) y `WAKE` (esperando
+el nombre) en los «no reconocido». Las líneas `[REPETIR]` informan si se solicitó
+el aviso, terminó, fue cancelado, falló su reproducción o se omitió por falta de
+activación, audio anterior a una pausa, salida ocupada o separación entre avisos.
+Un fallo reportado por el TTS ya no se considera una reproducción exitosa.
 
 Si la consulta al asistente falla o devuelve una respuesta inválida, usa las frases
 locales «Se me enredaron un poquito las ramas» y «¿Me lo repites en un momento?».
 El fallback que ya devuelve el bot se reproduce una sola vez. Si el modelo no
 comprende una pregunta, se le indica pedir la repetición con la frase del catálogo,
-sin inventar la intención. Esto no altera el esquema de respuestas ni las emociones.
-
-Al terminar el aviso y la pausa para evitar eco del altavoz, se abre otra ventana
-`ARBY_MIC_FOLLOWUP_SECONDS` para repetir sin decir «Arby». Hay como máximo dos
-recuperaciones automáticas por activación; después se vuelve a esperar el nombre.
-Decir «Arby» inicia una nueva activación. Los resultados de STT anteriores a una
-pausa se descartan. No se vuelve a consultar al modelo automáticamente ni se
-encadenan avisos si falla la salida de audio.
+sin inventar la intención. No se vuelve a consultar al modelo automáticamente ni
+se encadenan avisos si falla la salida de audio.
 
 Para que estas frases se escuchen incluso si se pierde internet, genera previamente
 las grabaciones con la voz, velocidad y tono que usará el equipo. Desde el proyecto,

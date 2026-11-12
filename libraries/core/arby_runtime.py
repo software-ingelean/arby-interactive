@@ -190,6 +190,7 @@ class ArbyRuntime:
                 raise CancelledError()
         if self.tts.last_error:
             self.events.put(("error", f"TTS: {self.tts.last_error}"))
+            raise RuntimeError('No se pudo reproducir la voz de Arby.')
         wait_for = cancel if cancel is not None else self._stop
         wait_for.wait(max(0, self.minimum_display - (time.monotonic() - started)))
         if self._stop.is_set() or wait_for.is_set():
@@ -248,6 +249,7 @@ class ArbyRuntime:
             raise CancelledError()
         if self.tts.last_error:
             self.events.put(("error", f"TTS: {self.tts.last_error}"))
+            raise RuntimeError('No se pudo reproducir la voz de Arby.')
 
     def _model_reply(self, text):
         """Speak one bounded fallback for query/validation failures, not TTS failures."""
