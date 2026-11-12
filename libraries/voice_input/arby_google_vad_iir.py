@@ -169,6 +169,7 @@ class GoogleWorker(threading.Thread):
         is_paused=None,
         request_timeout=10.0,
         generation=None,
+        on_unrecognized=None,
     ):
         super().__init__(daemon=True)
         self.jobs = jobs
@@ -176,6 +177,8 @@ class GoogleWorker(threading.Thread):
         self.language = language
         self.followup_seconds = followup_seconds
         self.on_question = on_question
+        self.on_unrecognized = on_unrecognized
+        self.repeat_prompt = None
         self.is_paused = is_paused or (lambda: False)
         self.generation = generation or (lambda: 0)
 
@@ -191,6 +194,7 @@ class GoogleWorker(threading.Thread):
             if current_generation != last_generation:
                 self.mode, self.deadline = "WAKE", None
                 last_generation = current_generation
+            self._resume_followup()
             try:
                 pcm = self.jobs.get(timeout=0.2)
             except queue.Empty:
@@ -209,8 +213,23 @@ class GoogleWorker(threading.Thread):
             finally:
                 self.jobs.task_done()
 
+    def _resume_followup(self):
+        # Wait for playback and the microphone's speaker-tail pause to end.
+        prompt = self.repeat_prompt
+        if prompt is not None and prompt.done() and not self.is_paused():
+            self._listen_for_command()
+            self.repeat_prompt = None
+
+    def _listen_for_command(self):
+        self.mode = "COMMAND"
+        self.deadline = time.monotonic() + self.followup_seconds
+        log("[ARBY] Escuchando tu pregunta...")
+
     def _recognize(self, pcm):
         if self.stop_event.is_set() or self.is_paused():
+            return
+        self._resume_followup()
+        if self.repeat_prompt is not None:
             return
         if self.deadline is not None and time.monotonic() > self.deadline:
             self.mode, self.deadline = "WAKE", None
@@ -224,12 +243,23 @@ class GoogleWorker(threading.Thread):
                 language=self.language,
                 show_all=False,
             )
+            if not text.strip():
+                raise sr.UnknownValueError()
             elapsed = time.perf_counter() - start
             log(f"[GOOGLE] {text} | {elapsed:.2f}s")
 
         except sr.UnknownValueError:
             elapsed = time.perf_counter() - start
             log(f"[GOOGLE] (no reconocido) | {elapsed:.2f}s")
+            if (self.mode == "COMMAND" and self.on_unrecognized is not None
+                    and not self.stop_event.is_set() and not self.is_paused()
+                    and generation == self.generation()):
+                try:
+                    self.repeat_prompt = self.on_unrecognized()
+                except (ValueError, RuntimeError) as exc:
+                    log(f"[ARBY] {exc}")
+                if self.repeat_prompt is not None:
+                    self.mode, self.deadline = "WAKE", None
             return
 
         except sr.RequestError as exc:
@@ -258,11 +288,7 @@ class GoogleWorker(threading.Thread):
                     self.deadline = None
                     self.deliver(remainder)
                 else:
-                    self.mode = "COMMAND"
-                    self.deadline = (
-                        time.monotonic() + self.followup_seconds
-                    )
-                    log("[ARBY] Escuchando tu pregunta...")
+                    self._listen_for_command()
 
         else:
             log(f"[PREGUNTA] {text}")
@@ -280,7 +306,8 @@ class GoogleWorker(threading.Thread):
 
 
 class ArbyPipeline:
-    def __init__(self, args, *, on_question=None, is_paused=None, on_voice_start=None):
+    def __init__(self, args, *, on_question=None, is_paused=None, on_voice_start=None,
+                 on_unrecognized=None):
         self.args = args
         self.is_paused = is_paused or (lambda: False)
         self.max_utterance_seconds = getattr(args, "max_utterance_seconds", 15.0)
@@ -323,6 +350,7 @@ class ArbyPipeline:
             args.language,
             args.followup_seconds,
             on_question=on_question,
+            on_unrecognized=on_unrecognized,
             is_paused=self.is_paused,
             request_timeout=getattr(args, "request_timeout", 10.0),
             generation=lambda: self.generation,
@@ -332,7 +360,8 @@ class ArbyPipeline:
     def visitor_active(self):
         """Cover VAD, queued/in-flight recognition and the wake follow-up."""
         with self._activity_lock:
-            if not self._ready.is_set() or self._capturing_voice:
+            if (not self._ready.is_set() or self._capturing_voice
+                    or self.google_worker.repeat_prompt is not None):
                 return True
             with self.google_q.mutex:
                 if self.google_q.unfinished_tasks:

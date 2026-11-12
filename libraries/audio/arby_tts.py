@@ -14,6 +14,8 @@ from tempfile import TemporaryDirectory
 import time
 from typing import Callable
 
+from libraries.audio.arby_recordings import recording_path
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -275,7 +277,16 @@ class ArbyTTS:
             await asyncio.gather(watcher, return_exceptions=True)
 
     async def _collect_audio(self, text):
-        """Retry synthesis only, before any of this phrase has been played."""
+        """Load a recording or retry synthesis before playing any audio."""
+        try:
+            with recording_path(self.config, text).open("rb") as recording:
+                data = recording.read(self.config.max_prefetch_bytes + 1)
+            if 0 < len(data) <= self.config.max_prefetch_bytes:
+                return data
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            LOGGER.warning("No se pudo leer la grabación local (%s).", _connection_detail(exc))
         for attempt in range(3):
             try:
                 return await self._collect_audio_once(text)

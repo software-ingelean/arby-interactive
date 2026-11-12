@@ -217,7 +217,7 @@ def main():
                 'strip': {'state': 'disabled' if not args.strip else 'unknown', 'detail': 'Simulada.' if not args.strip else 'Pendiente de inicializar.'},
             }
             event_mode = ambient_settings.mode == "evento"
-            ambient = AmbientSequence(ambient_settings) if event_mode else None
+            ambient = AmbientSequence(ambient_settings, speak=not args.mute)
             print(f"Estado: modo {ambient_settings.mode}.", flush=True)
             touch = None
             if args.trill:
@@ -320,14 +320,15 @@ def main():
                               else runtime.try_submit_ambient)
             while not stop.is_set():
                 started = time.monotonic()
-                if touch:
-                    touch.update(runtime, started)
+                touch_active = touch is not None and touch.update(runtime, started)
+                if touch_active:
+                    runtime.interrupt_ambient()
                 if preview and preview.requested_stop():
                     stop.set()
                     break
-                if ambient and not input_done.is_set():
+                if touch is not None or not input_done.is_set():
                     busy, current_revision = runtime.visitor_activity
-                    visitor_active = busy or current_revision != activity_revision
+                    visitor_active = touch_active or busy or current_revision != activity_revision
                     activity_revision = current_revision
                     ambient.tick(started, visitor_active=visitor_active, submit=submit_ambient)
                 support.tick(runtime, microphone, tts, touch, submit_ambient)

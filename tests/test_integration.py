@@ -1,15 +1,70 @@
 """Offline contracts for queueing, coordinated colors, cleanup and startup."""
-from concurrent.futures import CancelledError
+from concurrent.futures import CancelledError, Future
 import sys
 import threading
 import unittest
 from unittest.mock import patch
 
+from libraries.audio.arby_recordings import EVENT_PHRASES
+from libraries.core.arby_ambient import AmbientSequence, AmbientSettings, INVITATIONS
 from libraries.core.arby_runtime import ArbyRuntime, validate_reply
 from libraries.leds.arby_strip_led import LedStripController, StripConfig
 from libraries.eyes.matrix_output import MatrixOutput
 import run_arby
 from libraries.simulation.arby_memory_pixels import MemoryPixels
+
+
+class AmbientPhraseTests(unittest.TestCase):
+    def test_activity_restarts_countdown_and_playback_completion_starts_next_interval(self):
+        scheduler = AmbientSequence(AmbientSettings())
+        submitted = []
+
+        def submit(action):
+            future = Future()
+            submitted.append((action, future))
+            return future
+
+        def tick(now, active=False):
+            scheduler.tick(now, visitor_active=active, submit=submit)
+
+        tick(0)
+        tick(299, active=True)
+        tick(305, active=True)
+        tick(306)
+        tick(605.999)
+        self.assertEqual(submitted, [])
+        tick(606)
+        self.assertEqual(submitted[0][0].text, EVENT_PHRASES[0])
+        tick(612)
+        self.assertEqual(len(submitted), 1)
+        submitted[0][1].set_result(None)
+        tick(613)
+        tick(912.999)
+        self.assertEqual(len(submitted), 1)
+        tick(913)
+        self.assertEqual(submitted[1][0].text, EVENT_PHRASES[1])
+
+    def test_rotation_plays_event_phrases_and_invitations_in_order(self):
+        settings = AmbientSettings(mode="evento", gesture_min_seconds=20000,
+                                   gesture_max_seconds=20000)
+        scheduler = AmbientSequence(settings)
+        expected = [*EVENT_PHRASES, *(action.text for action in INVITATIONS)]
+        spoken = []
+
+        def submit(action):
+            self.assertEqual(action.kind, "phrase")
+            spoken.append(action.text)
+            future = Future()
+            future.set_result(None)
+            return future
+
+        scheduler.tick(0, visitor_active=False, submit=submit)
+        for index in range(1, len(expected) + 2):
+            scheduler.tick(index * 301 - 1, visitor_active=False, submit=submit)
+            scheduler.tick(index * 301, visitor_active=False, submit=submit)
+        self.assertEqual(len(spoken), len(expected) + 1)
+        self.assertEqual(spoken[:-1], expected)
+        self.assertEqual(spoken[-1], spoken[0])
 
 
 PALETTE = {"alegres": (0, 255, 80), "enojado": (255, 0, 0)}

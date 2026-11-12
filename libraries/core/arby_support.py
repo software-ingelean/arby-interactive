@@ -11,6 +11,7 @@ import sqlite3
 import time
 import uuid
 
+from libraries.audio.arby_recordings import SOUND_TEST
 from libraries.core.arby_ambient import (
     DEFAULT_DATABASE, AmbientSettings, load_ambient_settings, save_ambient_settings,
 )
@@ -182,7 +183,7 @@ class SupportBridge:
                     from libraries.core.arby_ambient import AmbientAction
                     component = 'speaker' if row['kind'] == 'speaker' else 'eyes'
                     enabled = self.snapshot['components'].get(component, {}).get('state') != 'disabled'
-                    action = (AmbientAction('phrase', 'alegres', 'Hola, soy Arby. Esta es una prueba de sonido.')
+                    action = (AmbientAction('phrase', 'alegres', SOUND_TEST)
                               if row['kind'] == 'speaker' else AmbientAction('eyes', 'guiño ojo', duration_seconds=2))
                     future = submit(action) if enabled else None
                     message = 'Prueba en curso.' if future else 'No disponible: componente desactivado o Arby ocupado. Intenta de nuevo.'

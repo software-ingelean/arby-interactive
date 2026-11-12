@@ -1,5 +1,6 @@
 """Offline voice contracts: activation, runtime bridge and playback exclusion."""
 import collections
+from concurrent.futures import Future
 import os
 import queue
 import sys
@@ -16,7 +17,7 @@ from libraries.voice_input.arby_microphone import MicrophoneInput
 # Optional voice packages are needed, but PortAudio/hardware are not.
 try:
     from libraries.voice_input.arby_google_vad_iir import (
-        ArbyPipeline, GoogleWorker, wake_match,
+        ArbyPipeline, GoogleWorker, wake_match, sr,
     )
 except ImportError as exc:
     raise unittest.SkipTest(f"Instala el extra voice: {exc}")
@@ -58,6 +59,33 @@ class VoiceTests(unittest.TestCase):
         self.assertEqual(self.recognize(["Arby", "¿Cómo estás?", "ignora esto"]),
                          ["¿Cómo estás?"])
 
+    def test_unrecognized_voice_requests_repetition_only_after_activation(self):
+        prompt = Future()
+        request_repetition, deliver = Mock(return_value=prompt), Mock()
+        generation = [0]
+        worker = GoogleWorker(queue.Queue(), threading.Event(), "es-CO", 8,
+                              on_question=deliver, on_unrecognized=request_repetition,
+                              generation=lambda: generation[0])
+        recognize = worker.recognizer.recognize_google = Mock(side_effect=[
+            sr.UnknownValueError(), "Arby", sr.RequestError("sin conexión"),
+            sr.UnknownValueError(), "¿Cómo estás?",
+        ])
+        pcm = bytes(1024)
+        for _ in range(3):
+            worker._recognize(pcm)
+        request_repetition.assert_not_called()
+        worker._recognize(pcm)
+        request_repetition.assert_called_once_with()
+        worker._recognize(pcm)
+        self.assertEqual(recognize.call_count, 4)
+        deliver.assert_not_called()
+
+        # Playback pauses capture and clears the previous wake state.
+        generation[0] += 1
+        prompt.set_result(None)
+        worker._recognize(pcm)
+        deliver.assert_called_once_with("¿Cómo estás?")
+
     def test_expired_activation_does_not_deliver(self):
         self.assertEqual(self.recognize(["Arby", "pregunta tardía"], followup=-1), [])
 
@@ -82,12 +110,15 @@ class VoiceTests(unittest.TestCase):
 
     def test_bridge_suppresses_busy_audio_and_resumes_after_tail(self):
         runtime = SimpleNamespace(pending_count=1, capture_blocked=True, interrupt_ambient=Mock(),
-                                  events=queue.Queue(), submit_text=Mock())
+                                  events=queue.Queue(), submit_text=Mock(),
+                                  submit_fixed_phrase=Mock())
         with patch.dict(os.environ, {}, clear=True):
             config = run_arby.load_config().microphone
         mic = MicrophoneInput(runtime, config, threading.Event(), threading.Event())
         with patch('libraries.voice_input.arby_microphone.time.monotonic', return_value=10):
             mic.submit("eco")
+            mic.request_repetition()
+        runtime.submit_fixed_phrase.assert_not_called()
         runtime.submit_text.assert_not_called()
         runtime.pending_count = 0
         runtime.capture_blocked = False
@@ -95,6 +126,10 @@ class VoiceTests(unittest.TestCase):
             self.assertTrue(mic.is_paused())
         with patch('libraries.voice_input.arby_microphone.time.monotonic', return_value=10.4):
             mic.submit("pregunta")
+            mic.request_repetition()
+        runtime.submit_fixed_phrase.assert_called_once_with(
+            "Perdón, no te escuché bien. ¿Me lo repites?", state="duda",
+        )
         runtime.submit_text.assert_called_once_with("pregunta")
 
     def test_continuous_speech_has_bounded_segment(self):

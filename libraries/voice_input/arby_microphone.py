@@ -2,6 +2,8 @@
 import threading
 import time
 
+from libraries.audio.arby_recordings import REPEAT_QUESTION
+
 
 class MicrophoneInput:
     def __init__(self, runtime, config, stop, input_done):
@@ -13,6 +15,7 @@ class MicrophoneInput:
         self.resume_at = 0.0
         self.error = None
         self.pipeline = ArbyPipeline(config, on_question=self.submit,
+                                     on_unrecognized=self.request_repetition,
                                      is_paused=self.is_paused,
                                      on_voice_start=runtime.interrupt_ambient)
         self.thread = threading.Thread(target=self.run, name="arby-microphone", daemon=True)
@@ -31,6 +34,13 @@ class MicrophoneInput:
         if not self.is_paused():
             self.runtime.events.put(("info", f"Tú: {text}"))
             self.runtime.submit_text(text)
+
+    def request_repetition(self):
+        if not self.is_paused():
+            return self.runtime.submit_fixed_phrase(
+                REPEAT_QUESTION, state="duda",
+            )
+        return None
 
     def start(self):
         self.thread.start()

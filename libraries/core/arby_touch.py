@@ -176,7 +176,7 @@ class TouchReactions:
             self.pending = None
             self.ready_at = now + self.cfg["speech_cooldown_seconds"]
         if now < self.next_read:
-            return
+            return self.detector.active is not None
         self.next_read = now + self.cfg["poll_seconds"]
         events = self.detector.update(self.reader.read(), now)
         for kind, channel in events:
@@ -188,3 +188,4 @@ class TouchReactions:
             self.pending = runtime.submit_fixed_phrase(phrase, state=STATES[kind])
             self.previous[kind] = phrase
             runtime.events.put(("info", f"Toque {kind}, canal {channel}"))
+        return self.detector.active is not None

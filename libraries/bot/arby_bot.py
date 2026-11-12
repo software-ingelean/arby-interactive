@@ -12,6 +12,9 @@ from pathlib import Path
 import re
 from threading import RLock
 
+from libraries.audio.arby_recordings import (
+    BOT_ERROR, BOT_TRY_LATER, IDENTITY_CHOOSE, IDENTITY_CLARIFY,
+)
 from libraries.core.arby_env import load_environment
 from libraries.bot.arby_knowledge import KnowledgeStore, normalize
 from libraries.core.arby_response import (
@@ -266,9 +269,9 @@ class ArbyBot:
             return f"¡Qué gusto, {self._confirmed['name'].split()[0]}!"
         if self._pending and key in no:
             self._pending = []
-            return "Gracias por aclararlo. ¿Cómo prefieres que te llame?"
+            return IDENTITY_CLARIFY
         if self._pending and key in yes:
-            return "¿Cuál de los nombres que te mencioné es el tuyo?"
+            return IDENTITY_CHOOSE
 
         # Full utterance aliases or explicit self introductions only. No substring
         # matching: '¿Dónde está Johan?' must never change the current identity.
@@ -407,8 +410,8 @@ class ArbyBot:
                     getattr(error, "code", "N/A"),
                 )
                 return normalize_reply({"segments": [
-                    make_segment("Se me enredaron un poquito las ramas.", "pensativos"),
-                    make_segment("¿Me lo repites en un momento?", "duda"),
+                    make_segment(BOT_ERROR, "pensativos"),
+                    make_segment(BOT_TRY_LATER, "duda"),
                 ]})
 
     def _search(self, text, *, k):
