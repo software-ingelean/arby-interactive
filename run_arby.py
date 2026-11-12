@@ -8,9 +8,12 @@ import logging
 import math
 import os
 import signal
+import sqlite3
 import threading
 import time
 
+from libraries.core.arby_support import SupportBridge, load_overrides, CONTROLS
+from dataclasses import asdict
 from libraries.core.arby_env import load_environment
 from libraries.audio.arby_audio_recovery import close_strip_and_recover_audio
 from libraries.simulation.arby_demo_bot import DemoBot
@@ -71,10 +74,11 @@ def load_config():
         "demo": (bool, False, None),
         "trill": (bool, False, None),
     }
+    overrides = load_overrides()
     settings = {}
     for name, (convert, default, choices) in fields.items():
         variable = "GEMINI_MODEL" if name == "model" else f"ARBY_{name.upper()}"
-        raw = os.getenv(variable, "").strip()
+        raw = str(overrides[name]).strip() if name in overrides else os.getenv(variable, "").strip()
         value = default
         if raw:
             try:
@@ -185,11 +189,13 @@ def main():
         print("Arby se configura desde .env; ejecuta sin argumentos. Consulta .env.example.")
         return 2
     load_environment()
+    support = SupportBridge()
     try:
         args = load_config()
         strip_config = StripConfig(args.strip_gpio, args.strip_leds,
                                    args.strip_brightness / 100, args.strip_effect)
-    except ValueError as exc:
+    except (ValueError, OSError, sqlite3.Error) as exc:
+        support.finish("error")
         print(f"Configuración inválida: {exc}")
         return 2
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
@@ -197,6 +203,19 @@ def main():
     try:
         with ExitStack() as stack:
             ambient_settings = load_ambient_settings()
+            support.snapshot['effective'] = {
+                'ambient': asdict(ambient_settings),
+                'controls': {key: (getattr(args, key) if key != 'rate' else args.rate or '+12%') for key in CONTROLS},
+            }
+            support.snapshot['capabilities'] = {'eyes': args.eyes != 'none', 'strip': args.strip,
+                                                'microphone': args.input_mode == 'voice', 'speaker': not args.mute}
+            support.snapshot['components'] = {
+                'trill': {'state': 'disabled' if not args.trill else 'unknown', 'detail': 'Desactivado.' if not args.trill else 'Pendiente de inicializar.'},
+                'microphone': {'state': 'disabled' if args.input_mode != 'voice' else 'unknown', 'detail': 'Entrada por consola.' if args.input_mode != 'voice' else 'Pendiente de inicializar.'},
+                'speaker': {'state': 'disabled' if args.mute else 'unknown', 'detail': 'Voz desactivada.' if args.mute else 'Sin comprobar.'},
+                'eyes': {'state': 'disabled' if args.eyes == 'none' else 'unknown', 'detail': 'Desactivados.' if args.eyes == 'none' else 'Pendientes de inicializar.'},
+                'strip': {'state': 'disabled' if not args.strip else 'unknown', 'detail': 'Simulada.' if not args.strip else 'Pendiente de inicializar.'},
+            }
             event_mode = ambient_settings.mode == "evento"
             ambient = AmbientSequence(ambient_settings) if event_mode else None
             print(f"Estado: modo {ambient_settings.mode}.", flush=True)
@@ -290,6 +309,11 @@ def main():
                 reader = threading.Thread(target=_console, args=(runtime, stop, input_done),
                                           name="arby-console", daemon=True)
                 reader.start()
+            support.snapshot['state'] = 'ready'
+            for name in ('trill', 'microphone', 'eyes', 'strip'):
+                component = support.snapshot['components'][name]
+                if component['state'] != 'disabled':
+                    component.update(state='ready', detail='Inicializado; confirma la respuesta físicamente.' if name in ('eyes', 'strip') else 'Inicializado y atendiendo lecturas.')
             revision = -1
             activity_revision = 0
             submit_ambient = (microphone.try_submit_ambient if microphone is not None
@@ -306,6 +330,7 @@ def main():
                     visitor_active = busy or current_revision != activity_revision
                     activity_revision = current_revision
                     ambient.tick(started, visitor_active=visitor_active, submit=submit_ambient)
+                support.tick(runtime, microphone, tts, touch, submit_ambient)
                 visual = runtime.visual
                 if visual.revision != revision:
                     eyes.set_state(visual.matrix_state, color=visual.color, now=started)
@@ -328,8 +353,10 @@ def main():
     except KeyboardInterrupt:
         stop.set()
     except Exception as exc:
+        support.finish("error")
         print(f"No se pudo ejecutar Arby: {type(exc).__name__}: {exc}")
         return 1
+    support.finish("stopped")
     return 0
 
 

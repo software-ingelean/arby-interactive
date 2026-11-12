@@ -1,0 +1,232 @@
+"""Offline support contracts: auth, persistence, stale state and shared runtime admission."""
+from concurrent.futures import Future
+from contextlib import closing
+from dataclasses import asdict
+import importlib.util
+import json
+import os
+from pathlib import Path
+import tempfile
+import time
+from types import SimpleNamespace
+import unittest
+from unittest.mock import Mock, patch
+
+from werkzeug.security import generate_password_hash
+from libraries.core.arby_ambient import AmbientSettings, load_ambient_settings, save_ambient_settings
+from libraries.core.arby_support import (SupportBridge, connect, initialize, settings,
+                                        save_settings, runtime_status, enqueue, validate_controls)
+from libraries.support.server import create_app, system_action
+import run_arby
+
+
+class SupportTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.password_hash = generate_password_hash('support-test')
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.database = Path(temp.name) / 'settings.sqlite3'
+        self.system = Mock(return_value={'ok': True})
+        self.app = create_app(self.database, self.password_hash, self.system)
+        self.app.testing = True
+        self.client = self.app.test_client()
+        self.csrf = self.client.get('/api/session').json['csrf']
+
+    def request(self, url, data=None, method='POST'):
+        return self.client.open(url, method=method, json=data or {}, headers={'X-CSRF-Token': self.csrf})
+
+    def login(self):
+        response = self.request('/api/login', {'password': 'support-test'})
+        self.assertEqual(response.status_code, 200)
+        self.csrf = response.json['csrf']
+
+    def publish(self, **updates):
+        snapshot = {'state': 'ready', 'components': {'speaker': {'state': 'unknown'}, 'eyes': {'state': 'ready'}},
+                    'effective': settings(self.database)}
+        snapshot.update(updates)
+        with closing(connect(self.database)) as db, db:
+            db.execute('INSERT OR REPLACE INTO support_runtime VALUES(1,?,?)', (time.time(), json.dumps(snapshot)))
+
+    def payload(self):
+        return {'ambient': asdict(AmbientSettings('evento')), 'controls': {'mute': True, 'mic_gain_db': 10, 'rate': '+8%'}}
+
+    def test_authentication_and_csrf_are_required(self):
+        self.assertEqual(self.client.get('/api/status').status_code, 401)
+        self.assertEqual(self.client.post('/api/login', json={'password': 'support-test'}).status_code, 403)
+        self.login()
+        self.assertEqual(self.client.get('/api/status').status_code, 200)
+        self.assertEqual(self.client.post('/api/restart', json={'target': 'arby'}).status_code, 403)
+        self.system.assert_not_called()
+
+    def test_login_throttle_and_logout(self):
+        for _ in range(5):
+            self.assertEqual(self.request('/api/login', {'password': 'wrong'}).status_code, 401)
+        self.assertEqual(self.request('/api/login', {'password': 'wrong'}).status_code, 429)
+
+    def test_logout_invalidates_access(self):
+        self.login()
+        self.assertEqual(self.request('/api/logout').status_code, 200)
+        self.assertEqual(self.client.get('/api/status').status_code, 401)
+
+    def test_settings_save_without_restarting_and_pending_changes(self):
+        self.login()
+        self.publish()
+        self.assertFalse(self.client.get('/api/status').json['runtime']['pending_changes'])
+        self.assertEqual(self.request('/api/settings', self.payload(), 'PUT').status_code, 200)
+        self.system.assert_not_called()
+        self.assertEqual(load_ambient_settings(self.database).mode, 'evento')
+        self.assertTrue(self.client.get('/api/status').json['runtime']['pending_changes'])
+        self.publish()
+        self.assertFalse(self.client.get('/api/status').json['runtime']['pending_changes'])
+
+    def test_invalid_update_is_atomic(self):
+        before = settings(self.database)
+        invalid = self.payload()
+        invalid['controls']['mic_gain_db'] = 100
+        with self.assertRaises(ValueError):
+            save_settings(invalid, self.database)
+        self.assertEqual(settings(self.database), before)
+        for value in (float('inf'), float('nan'), True, 'ten'):
+            invalid = self.payload()
+            invalid['ambient']['gesture_min_seconds'] = value
+            with self.assertRaises((ValueError, TypeError)):
+                save_settings(invalid, self.database)
+        self.assertEqual(settings(self.database), before)
+
+    def test_credentials_and_hardware_keys_cannot_be_saved(self):
+        for key in ('GEMINI_API_KEY', 'strip_gpio', 'voice', '__class__'):
+            with self.assertRaises(ValueError):
+                validate_controls({key: 'secret'})
+
+    def test_stale_state_and_stopped_runtime_reject_tests(self):
+        self.publish()
+        with closing(connect(self.database)) as db, db:
+            db.execute('UPDATE support_runtime SET updated=?', (time.time() - 20,))
+        self.assertFalse(runtime_status(self.database)['fresh'])
+        with self.assertRaises(ValueError):
+            enqueue('speaker', self.database)
+        self.publish(state='stopped')
+        with self.assertRaises(ValueError):
+            enqueue('speaker', self.database)
+
+    def test_tests_are_admitted_by_existing_runtime_and_busy_is_rejected(self):
+        with patch.dict(os.environ, {'ARBY_SUPPORT': 'true'}):
+            bridge = SupportBridge(self.database)
+        bridge.snapshot.update(state='ready', components={'speaker': {'state': 'unknown'}})
+        bridge.publish()
+        identifier = enqueue('speaker', self.database)
+        submit = Mock(return_value=None)
+        runtime = SimpleNamespace(pending_count=1, visual=SimpleNamespace(phase='speaking'))
+        tts = SimpleNamespace(last_error=None)
+        bridge.tick(runtime, None, tts, None, submit)
+        with closing(connect(self.database)) as db:
+            row = db.execute('SELECT * FROM support_commands WHERE id=?', (identifier,)).fetchone()
+        self.assertEqual(row['state'], 'error')
+        self.assertEqual(submit.call_args.args[0].kind, 'phrase')
+        self.assertIn('ocupado', row['message'])
+
+    def test_test_completion_and_failure(self):
+        with patch.dict(os.environ, {'ARBY_SUPPORT': 'true'}):
+            bridge = SupportBridge(self.database)
+        bridge.snapshot.update(state='ready', components={'speaker': {'state': 'unknown'}})
+        bridge.publish()
+        identifier = enqueue('eyes', self.database)
+        future = Future()
+        runtime = SimpleNamespace(pending_count=0, visual=SimpleNamespace(phase='idle'))
+        tts = SimpleNamespace(last_error=None)
+        bridge.tick(runtime, None, tts, None, lambda action: future)
+        future.set_result(None)
+        bridge.next_poll = 0
+        bridge.tick(runtime, None, tts, None, lambda action: None)
+        with closing(connect(self.database)) as db:
+            row = db.execute('SELECT * FROM support_commands WHERE id=?', (identifier,)).fetchone()
+        self.assertEqual(row['state'], 'done')
+
+    def test_failed_future_is_reported_without_exception_details(self):
+        with patch.dict(os.environ, {'ARBY_SUPPORT': 'true'}):
+            bridge = SupportBridge(self.database)
+        bridge.snapshot.update(state='ready', components={'eyes': {'state': 'ready'}})
+        bridge.publish()
+        identifier = enqueue('eyes', self.database)
+        future = Future()
+        runtime = SimpleNamespace(pending_count=0, visual=SimpleNamespace(phase='idle'))
+        bridge.tick(runtime, None, SimpleNamespace(last_error=None), None, lambda action: future)
+        future.set_exception(RuntimeError('private provider details'))
+        bridge.next_poll = 0
+        bridge.tick(runtime, None, SimpleNamespace(last_error=None), None, lambda action: None)
+        with closing(connect(self.database)) as db:
+            row = db.execute('SELECT * FROM support_commands WHERE id=?', (identifier,)).fetchone()
+        self.assertEqual(row['state'], 'error')
+        self.assertNotIn('private', row['message'])
+
+    def test_invalid_request_object_is_rejected(self):
+        self.login()
+        response = self.client.post('/api/restart', json=['arby'], headers={'X-CSRF-Token': self.csrf})
+        self.assertEqual(response.status_code, 400)
+        self.system.assert_not_called()
+
+    def test_database_failure_does_not_stop_arby(self):
+        with patch.dict(os.environ, {'ARBY_SUPPORT': 'true'}):
+            bridge = SupportBridge(self.database)
+        with patch('libraries.core.arby_support.connect', side_effect=__import__('sqlite3').OperationalError('locked')):
+            bridge.tick(Mock(), None, Mock(), None, Mock())
+            bridge.finish('error')
+
+    def test_existing_ambient_database_is_preserved(self):
+        save_ambient_settings(AmbientSettings('evento', 10, 20, 30, 40), self.database)
+        initialize(self.database)
+        self.assertEqual(load_ambient_settings(self.database).gesture_range, (10, 20))
+
+    def test_overrides_win_over_environment(self):
+        with patch.dict(os.environ, {'ARBY_MIC_GAIN_DB': 'invalid', 'ARBY_MUTE': 'false'}, clear=True), patch.object(run_arby, 'load_overrides', return_value={'mic_gain_db': 9, 'mute': True}):
+            config = run_arby.load_config()
+        self.assertEqual(config.microphone.gain_db, 9)
+        self.assertTrue(config.mute)
+
+    def test_restart_allowlist(self):
+        self.login()
+        self.assertEqual(self.request('/api/restart', {'target': 'anything'}).status_code, 400)
+        self.system.assert_not_called()
+        self.assertEqual(self.request('/api/restart', {'target': 'arby'}).status_code, 200)
+        self.system.assert_called_once_with('arby')
+
+    def test_page_and_local_assets(self):
+        for path in ('/', '/static/portal.js', '/static/portal.css'):
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.headers['X-Frame-Options'], 'DENY')
+            response.close()
+
+    def test_system_failure_has_no_subprocess_output_or_password(self):
+        with patch('libraries.support.server.subprocess.run', return_value=SimpleNamespace(returncode=1, stdout='secret', stderr='password')):
+            with self.assertRaises(ValueError) as caught:
+                system_action('wifi', ssid='fair', password='password')
+        self.assertNotIn('password', str(caught.exception))
+
+
+class HelperTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location('arby_system', Path(__file__).resolve().parents[1] / 'deploy' / 'arby-system.py')
+        cls.helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.helper)
+
+    def test_helper_rejects_arbitrary_actions_and_invalid_wifi(self):
+        for payload in ({'action': 'shell'}, {'action': 'wifi', 'ssid': '--help', 'password': ''}, {'action': 'wifi', 'ssid': 'fair', 'password': 'bad\nvalue'}):
+            with self.assertRaises(ValueError), patch.object(self.helper, 'run') as run:
+                self.helper.execute(payload)
+            run.assert_not_called()
+
+    def test_password_is_not_a_process_argument(self):
+        with patch.object(self.helper, 'run') as run:
+            self.helper.execute({'action': 'wifi', 'ssid': 'Fair', 'password': 'secret-123'})
+        args = run.call_args.args[0]
+        self.assertNotIn('secret-123', args)
+        self.assertIn('--passwd-file', args)
+        self.assertFalse(Path(args[args.index('--passwd-file') + 1]).exists())
+
+    def test_nmcli_escaped_ssid_fields(self):
+        self.assertEqual(self.helper.split_fields(r'Fair\: Booth:80:WPA2'), ['Fair: Booth', '80', 'WPA2'])

@@ -162,3 +162,9 @@ uv run python -m herramientas.probar_voces --text "Hola, ¿cómo estás?" --rate
 Las muestras quedan en `assets/muestras_voz/`. La síntesis necesita Internet; después
 puedes reproducir los MP3 sin conexión. Usa `--no-play` si solo quieres generar
 los archivos y `--list-voices` para consultar todas las voces disponibles.
+
+## Portal de soporte para feria
+
+El panel local permite ver componentes, guardar ajustes, probar sonido y ojos,
+configurar Wi-Fi y reiniciar Arby o la Raspberry. Consulta la
+[instalación y uso del portal](docs/PORTAL_SOPORTE.md).

@@ -1,0 +1,27 @@
+[Unit]
+Description=Arby local support portal
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=@PROJECT_DIR@
+ExecStart=@PROJECT_DIR@/.venv/bin/python -m libraries.support.server
+User=arby-portal
+Group=arby-support
+UMask=0007
+EnvironmentFile=/etc/arby/portal.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Restart=on-failure
+RestartSec=5
+ProtectSystem=strict
+ReadWritePaths=@PROJECT_DIR@/config
+ProtectHome=read-only
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# NoNewPrivileges is intentionally absent: the fixed sudo helper needs elevation.
+
+[Install]
+WantedBy=multi-user.target

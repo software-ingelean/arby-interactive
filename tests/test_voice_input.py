@@ -81,7 +81,8 @@ class VoiceTests(unittest.TestCase):
         self.assertEqual(delivered, [])
 
     def test_bridge_suppresses_busy_audio_and_resumes_after_tail(self):
-        runtime = SimpleNamespace(pending_count=1, events=queue.Queue(), submit_text=Mock())
+        runtime = SimpleNamespace(pending_count=1, capture_blocked=True, interrupt_ambient=Mock(),
+                                  events=queue.Queue(), submit_text=Mock())
         with patch.dict(os.environ, {}, clear=True):
             config = run_arby.load_config().microphone
         mic = MicrophoneInput(runtime, config, threading.Event(), threading.Event())
@@ -89,6 +90,7 @@ class VoiceTests(unittest.TestCase):
             mic.submit("eco")
         runtime.submit_text.assert_not_called()
         runtime.pending_count = 0
+        runtime.capture_blocked = False
         with patch('libraries.voice_input.arby_microphone.time.monotonic', return_value=10.2):
             self.assertTrue(mic.is_paused())
         with patch('libraries.voice_input.arby_microphone.time.monotonic', return_value=10.4):
