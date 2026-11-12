@@ -248,7 +248,22 @@ Para cambiar la voz, configura `ARBY_VOICE=es-MX-JorgeNeural`,
 uv run python run_arby.py
 ```
 
-Fija el modelo con `GEMINI_MODEL` en `.env`.
+Fija el modelo principal con `GEMINI_MODEL` y las alternativas con
+`GEMINI_FALLBACK_MODELS`, separadas por comas (por defecto `gemini-flash-lite-latest`).
+Una lista vacía desactiva las alternativas. Usa modelos disponibles para tu clave
+que admitan salida JSON estructurada; los nombres duplicados se eliminan.
+Ante HTTP 404, 408, 429, 500, 502, 503, 504 o fallos de conexión/timeout,
+se prueba el siguiente modelo conservando historial y contexto. Cada modelo se
+intenta una vez por respuesta, sin reintentos adicionales del SDK.
+El modelo fallido queda en pausa `ARBY_MODEL_COOLDOWN_SECONDS` (60 segundos);
+luego vuelve a probarse en orden de prioridad. Si todos fallan o están en pausa,
+Arby devuelve su respuesta local de error sin agregarla al historial.
+Errores de autenticación, permisos o entrada inválida no activan cambios de modelo.
+Los logs indican el modelo fallido sin imprimir mensajes del proveedor;
+`bot.last_model` indica qué modelo devolvió la última generación.
+`ARBY_BOT_TIMEOUT` se aplica por intento: la espera total puede crecer con el pool.
+Cambiar de modelo no elimina cuotas compartidas del proyecto ni límites de gasto.
+Consulta los [límites de Gemini](https://ai.google.dev/gemini-api/docs/rate-limits).
 `ARBY_FFPLAY` acepta el nombre `ffplay` o una ruta del equipo donde ejecutas.
 
 ## STT y sensores: puntos de conexión preparados

@@ -58,6 +58,7 @@ def load_config():
         "slowdown": (int, 2, None),
         "swap_eyes": (bool, False, None),
         "model": (str, None, None),
+        "model_cooldown_seconds": (float, 60.0, None),
         "bot_timeout": (float, 30.0, None),
         "voice": (str, None, None),
         "rate": (str, None, None),
@@ -112,6 +113,8 @@ def load_config():
     ):
         raise ValueError("ARBY_AUDIO_RECOVER_ON_EXIT requiere ARBY_AUDIO_DRIVER=alsa y "
                          "ARBY_AUDIO_DEVICE=plughw:CARD=Headphones,DEV=0.")
+    if not 0 < config.model_cooldown_seconds < float("inf"):
+        raise ValueError("ARBY_MODEL_COOLDOWN_SECONDS debe ser positivo y finito.")
     if not 0 < config.bot_timeout < float("inf"):
         raise ValueError("ARBY_BOT_TIMEOUT debe ser positivo y finito.")
     if config.eyes == "matrix" and config.multiplexing is None:
@@ -239,7 +242,10 @@ def main():
                 bot = ArbyBot(config=BotConfig(
                     model=args.model or BotConfig().model,
                     timeout_seconds=args.bot_timeout,
-                    event_mode=event_mode))
+                    event_mode=event_mode,
+                    fallback_models=tuple(model.strip() for model in os.getenv(
+                        "GEMINI_FALLBACK_MODELS", "gemini-flash-lite-latest").split(",") if model.strip()),
+                    model_cooldown_seconds=args.model_cooldown_seconds))
                 palette = EMOTION_COLORS
             # Until runtime starts, protect client cleanup during partial startup.
             with ExitStack() as clients:

@@ -5,6 +5,8 @@ from collections import deque
 from dataclasses import dataclass
 import json
 import logging
+import math
+import time
 import os
 from pathlib import Path
 import re
@@ -150,8 +152,14 @@ class BotConfig:
     timeout_seconds: float = 30.0
     max_input_chars: int = 4000
     event_mode: bool = False
+    fallback_models: tuple[str, ...] = ("gemini-flash-lite-latest",)
+    model_cooldown_seconds: float = 60.0
 
     def __post_init__(self):
+        if not self.model.strip() or any(not model.strip() for model in self.fallback_models):
+            raise ValueError("Los nombres de modelos no pueden estar vacíos.")
+        if not math.isfinite(self.model_cooldown_seconds) or self.model_cooldown_seconds <= 0:
+            raise ValueError("model_cooldown_seconds debe ser positivo y finito.")
         if self.history_turns < 1 or self.retrieval_k < 1:
             raise ValueError("history_turns y retrieval_k deben ser positivos.")
         if self.max_output_tokens < 1 or self.timeout_seconds <= 0 or self.max_input_chars < 1:
@@ -170,7 +178,14 @@ class ArbyBot:
     """
     def __init__(self, context_path=None, index_path=None, *, api_key=None,
                  config=None, client=None, knowledge=None):
-        self.config = config or BotConfig(model=os.getenv("GEMINI_MODEL", "gemini-flash-latest"))
+        self.config = config or BotConfig(
+            model=os.getenv("GEMINI_MODEL", "").strip() or BotConfig().model,
+            fallback_models=tuple(m.strip() for m in os.getenv(
+                "GEMINI_FALLBACK_MODELS", "gemini-flash-lite-latest").split(",") if m.strip()),
+            model_cooldown_seconds=float(os.getenv("ARBY_MODEL_COOLDOWN_SECONDS", "60")))
+        self._models = tuple(dict.fromkeys((self.config.model, *self.config.fallback_models)))
+        self._model_retry_at = {}
+        self.last_model = None
         self._lock = RLock()
         self._closed = False
         self._history = deque(maxlen=self.config.history_turns)
@@ -199,7 +214,7 @@ class ArbyBot:
                 http_options=types.HttpOptions(
                     timeout=int(self.config.timeout_seconds * 1000),
                     retry_options=types.HttpRetryOptions(
-                        attempts=3,
+                        attempts=1,
                         initial_delay=1.0,
                         max_delay=4.0,
                         exp_base=2.0,
@@ -292,6 +307,35 @@ class ArbyBot:
                 self._confirmed = {"id": None, "name": name_key.title(), "text": ""}
         return None
 
+    def _generate(self, contents, generation_config):
+        """Try available models once; retain cooldowns across session resets."""
+        self.last_model = None
+        last_error = None
+        for model in self._models:
+            if self._model_retry_at.get(model, 0) > time.monotonic():
+                continue
+            try:
+                response = self._client.models.generate_content(
+                    model=model, contents=contents, config=generation_config)
+            except Exception as error:
+                code = getattr(error, "code", None)
+                if code not in (404, 408, 429, 500, 502, 503, 504) and not isinstance(
+                        error, (TimeoutError, ConnectionError)):
+                    from httpx import TransportError
+                    if not isinstance(error, TransportError):
+                        raise
+                self._model_retry_at[model] = time.monotonic() + self.config.model_cooldown_seconds
+                LOGGER.warning("Arby model unavailable: %s | HTTP: %s | Error: %s",
+                               model, code, type(error).__name__)
+                last_error = error
+                continue
+            self._model_retry_at.pop(model, None)
+            self.last_model = model
+            return response
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Todos los modelos están en pausa temporal; intenta más tarde.")
+
     def respond(self, text: str) -> dict:
         if not isinstance(text, str):
             raise TypeError("text debe ser un str.")
@@ -342,13 +386,12 @@ class ArbyBot:
                 payload = json.dumps({"conocimiento_recuperado": docs,
                                       "mensaje_actual": text}, ensure_ascii=False)
                 contents.append(types.Content(role="user", parts=[types.Part.from_text(text=payload)]))
-                response = self._client.models.generate_content(
-                    model=self.config.model, contents=contents,
-                    config=types.GenerateContentConfig(system_instruction=instructions,
-                        temperature=self.config.temperature,
-                        max_output_tokens=self.config.max_output_tokens,
-                        response_mime_type="application/json",
-                        response_json_schema=RESPONSE_SCHEMA))
+                response = self._generate(contents, types.GenerateContentConfig(
+                    system_instruction=instructions,
+                    temperature=self.config.temperature,
+                    max_output_tokens=self.config.max_output_tokens,
+                    response_mime_type="application/json",
+                    response_json_schema=RESPONSE_SCHEMA))
                 # Do not speak or retain an answer cut mid-sentence by the API.
                 candidates = getattr(response, "candidates", None)
                 if candidates and str(candidates[0].finish_reason).endswith("MAX_TOKENS"):
@@ -359,10 +402,9 @@ class ArbyBot:
                 # Do not log the exception body: provider messages can echo input.
                 self.last_error = type(error).__name__
                 LOGGER.warning(
-                    "Arby request failed: %s | HTTP: %s | Message: %s",
+                    "Arby request failed: %s | HTTP: %s",
                     self.last_error,
                     getattr(error, "code", "N/A"),
-                    getattr(error, "message", str(error)),
                 )
                 return normalize_reply({"segments": [
                     make_segment("Se me enredaron un poquito las ramas.", "pensativos"),
