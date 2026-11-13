@@ -347,6 +347,30 @@ class HelperTests(unittest.TestCase):
         self.assertTrue(result['powered'])
         self.assertEqual(result['devices'][0], {'address': 'AA:BB:CC:DD:EE:FF', 'name': 'Altavoz de Arby', 'connected': True, 'paired': False})
 
+    def test_bluetooth_resolves_mac_placeholder_to_device_name(self):
+        for placeholder in ('AA:BB:CC:DD:EE:FF', 'AA-BB-CC-DD-EE-FF'):
+            with self.subTest(placeholder=placeholder), patch.object(self.helper, 'bluetooth', side_effect=[
+                'Powered: yes', f'Device AA:BB:CC:DD:EE:FF {placeholder}', '', '',
+                'Name: JBL Flip\nAlias: AA-BB-CC-DD-EE-FF',
+            ]):
+                self.assertEqual(self.helper.bluetooth_status()['devices'][0]['name'], 'JBL Flip')
+
+    def test_bluetooth_missing_name_does_not_hide_device(self):
+        with patch.object(self.helper, 'bluetooth', side_effect=[
+            'Powered: yes', 'Device AA:BB:CC:DD:EE:FF AA-BB-CC-DD-EE-FF', '', '',
+            ValueError('Device unavailable'),
+        ]):
+            device = self.helper.bluetooth_status()['devices'][0]
+        self.assertEqual(device['name'], 'Dispositivo sin nombre')
+        self.assertEqual(device['address'], 'AA:BB:CC:DD:EE:FF')
+
+    def test_bluetooth_uses_readable_alias_when_name_missing(self):
+        with patch.object(self.helper, 'bluetooth', side_effect=[
+            'Powered: yes', 'Device AA:BB:CC:DD:EE:FF AA-BB-CC-DD-EE-FF', '', '',
+            'Alias: Altavoz de sala',
+        ]):
+            self.assertEqual(self.helper.bluetooth_status()['devices'][0]['name'], 'Altavoz de sala')
+
     def test_password_is_not_a_process_argument(self):
         with patch.object(self.helper, 'run') as run:
             self.helper.execute({'action': 'wifi', 'ssid': 'Fair', 'password': 'secret-123'})

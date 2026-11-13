@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 
 def run(args, timeout=25, input=None):
@@ -42,16 +43,33 @@ def bluetooth_properties(output):
     return dict(line.strip().split(': ', 1) for line in output.splitlines() if ': ' in line)
 
 
+def bluetooth_name(value, address):
+    value = value.strip()
+    if not value or value.lower().replace('-', ':') == address.lower():
+        return None
+    return value
+
+
 def bluetooth_status():
     controller = bluetooth_properties(bluetooth('show'))
     rows = bluetooth('devices')
     connected = bluetooth('devices', 'Connected')
     paired = bluetooth('devices', 'Paired')
     devices = []
+    name_deadline = time.monotonic() + 8
     for line in rows.splitlines():
         match = re.fullmatch(r'Device ((?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}) (.+)', line)
         if match:
             address, name = match.groups()
+            name = bluetooth_name(name, address)
+            if not name and time.monotonic() < name_deadline:
+                try:
+                    properties = bluetooth_properties(bluetooth('info', address, seconds=1))
+                    name = (bluetooth_name(properties.get('Name', ''), address)
+                            or bluetooth_name(properties.get('Alias', ''), address))
+                except (ValueError, OSError, subprocess.SubprocessError):
+                    pass
+            name = name or 'Dispositivo sin nombre'
             devices.append({'address': address, 'name': name,
                             'connected': f'Device {address} ' in connected,
                             'paired': f'Device {address} ' in paired})

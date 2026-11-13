@@ -550,16 +550,24 @@ async function loadBluetooth(scan = false) {
   $('bluetooth-status').textContent = scan ? 'Buscando dispositivos cercanos…' : 'Consultando Bluetooth…';
   try {
     const result = await api(scan ? '/api/bluetooth/scan' : '/api/bluetooth', scan ? 'POST' : 'GET');
+    const unnamed = result.devices.some(device => device.name === 'Dispositivo sin nombre');
     $('bluetooth-status').textContent = result.powered
       ? (result.devices.length ? 'Bluetooth encendido. Elige un dispositivo.' : 'Sin dispositivos. Activa el modo de emparejamiento y busca de nuevo.')
       : 'Bluetooth apagado. Pulsa Buscar dispositivos para encenderlo.';
+    if (result.powered && unnamed) $('bluetooth-status').textContent += ' Algunos dispositivos aún no anuncian su nombre. Activa su modo de emparejamiento y pulsa Buscar dispositivos de nuevo.';
     for (const device of result.devices.sort((a, b) => Number(b.connected) - Number(a.connected) || Number(b.paired) - Number(a.paired) || a.name.localeCompare(b.name))) {
       const card = document.createElement('article');
       card.className = 'card bluetooth-device';
       const name = document.createElement('strong');
       name.textContent = device.name;
       const state = document.createElement('p');
-      state.textContent = `${device.address} · ${device.connected ? 'Conectado' : device.paired ? 'Emparejado' : 'Sin emparejar'}`;
+      state.textContent = device.connected ? 'Conectado' : device.paired ? 'Emparejado' : 'Sin emparejar';
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+      summary.textContent = 'Identificador del dispositivo';
+      const address = document.createElement('p');
+      address.textContent = device.address;
+      details.append(summary, address);
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'secondary';
@@ -581,7 +589,7 @@ async function loadBluetooth(scan = false) {
           await loadBluetooth();
         }
       }));
-      card.append(name, state, button);
+      card.append(name, state, button, details);
       $('bluetooth-devices').append(card);
     }
   } catch (error) {

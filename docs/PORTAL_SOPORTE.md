@@ -247,6 +247,11 @@ requieren la sesión de soporte y protección CSRF. Los dispositivos que requier
 introducir o confirmar un PIN deben emparejarse previamente por SSH con
 `bluetoothctl`. La conexión no cambia automáticamente la selección de audio de Arby.
 
+La lista muestra el nombre anunciado por el dispositivo y consulta su nombre o alias
+si BlueZ devuelve una dirección como etiqueta. La MAC queda en **Identificador del
+dispositivo**, un detalle desplegable. Si aparece **Dispositivo sin nombre**, activa
+su modo de emparejamiento y vuelve a buscar; algunos equipos no anuncian su nombre.
+
 En la Raspberry instala BlueZ y actualiza el helper después de traer estos cambios:
 
 ```bash
