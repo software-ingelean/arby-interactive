@@ -2,7 +2,7 @@
 import threading
 import time
 
-from libraries.audio.arby_recordings import REPEAT_QUESTION
+from libraries.audio.arby_recordings import REPEAT_PHRASES
 
 
 class MicrophoneInput:
@@ -14,6 +14,7 @@ class MicrophoneInput:
         self.input_done = input_done
         self.resume_at = 0.0
         self.error = None
+        self._repeat_index = 0
         self.track_visits = getattr(runtime, "visit_recorder", None) is not None
         self.pipeline = ArbyPipeline(config, on_question=self.submit,
                                      on_unrecognized=self.request_repetition,
@@ -53,11 +54,13 @@ class MicrophoneInput:
 
     def request_repetition(self):
         self.trace("Voz no reconocida; solicitando repetición")
-        if not self.is_paused():
-            return self.runtime.submit_fixed_phrase(
-                REPEAT_QUESTION, state="duda",
-            )
-        return None
+        if self.is_paused():
+            return None
+        phrase = REPEAT_PHRASES[self._repeat_index]
+        pending = self.runtime.submit_fixed_phrase(phrase, state="duda")
+        if pending is not None:
+            self._repeat_index = (self._repeat_index + 1) % len(REPEAT_PHRASES)
+        return pending
 
     def start(self):
         self.thread.start()

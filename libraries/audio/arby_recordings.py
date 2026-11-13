@@ -13,6 +13,18 @@ from libraries.core.arby_response import clean_for_speech
 RECORDINGS_DIR = Path(__file__).resolve().parents[2] / "assets" / "phrases"
 
 REPEAT_QUESTION = "Perdón, no te escuché bien. ¿Me lo repites?"
+REPEAT_PHRASES = (
+    REPEAT_QUESTION,
+    "¿Me lo repites, porfa?",
+    "Uy, se me escapó lo que dijiste.",
+    "No alcancé a entenderte. ¿Puedes repetirlo?",
+    "Dímelo otra vez, porfa. Te escucho.",
+    "Un momentico, ¿qué me decías?",
+    "Solo escuché una parte. ¿Me lo repites?",
+    "Esa se me pasó. ¿Me la dices otra vez?",
+    "¿Puedes decirlo un poquito más despacio?",
+    "Se me perdió el hilo. ¿Me lo repites?",
+)
 SOUND_TEST = "Hola, soy Arby. Esta es una prueba de sonido."
 BOT_ERROR = "Se me enredaron un poquito las ramas."
 BOT_TRY_LATER = "¿Me lo repites en un momento?"
@@ -30,6 +42,15 @@ EVENT_PHRASES = (
     "Me llaman el Árbol de la Felicidad. Mi secreto: crecer con calma y disfrutar lo simple.",
     "¿Sabías que la jabuticaba puede dar frutos directamente en su tronco?",
     "Gracias por visitarme. ¡Que hoy florezcan muchas cosas bonitas para ti!",
+    "Vine por el DJ, me quedé por el sol y no pienso mover ni una raíz hasta que apaguen la música.",
+    "Amo que el festival sea pet friendly, pero al primer perro que me mire con cara de poste le tiro una rama.",
+    "Este origen está increíble, sabe a pura finca de Risaralda.",
+    "Reportándome en vivo desde el mejor parche de Pereira.",
+    "Si se van a tomar foto conmigo, asegúrense de que salga mi mejor perfil. No acepto fotos con gente aburrida.",
+    "Súbanle al DJ que hoy tengo la clorofila al cien!",
+    "Perdón por opacarlos, es que hoy amanecí divino.",
+    "¿Si ve? Por eso es que yo no hago deporte, uno queda todo vuelto nada.",
+    "¡Bueno pues! ¿Vinimos a hacer estiramientos o a azotar baldosa?",
 )
 
 
@@ -44,7 +65,7 @@ def phrases_to_record():
     from libraries.core.arby_touch import PHRASES
 
     phrases = (
-        REPEAT_QUESTION, SOUND_TEST, BOT_ERROR, BOT_TRY_LATER,
+        *REPEAT_PHRASES, SOUND_TEST, BOT_ERROR, BOT_TRY_LATER,
         IDENTITY_CLARIFY, IDENTITY_CHOOSE,
         *EVENT_PHRASES,
         *(action.text for action in INVITATIONS),
