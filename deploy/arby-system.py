@@ -5,6 +5,7 @@ Only fixed operations, no shell, no caller-selected devices or service names.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -31,6 +32,33 @@ def split_fields(line):
     return fields + [current]
 
 
+def bluetooth(command, *args, seconds=4):
+    result = run(['/usr/bin/bluetoothctl', '--timeout', str(seconds), command, *args], timeout=seconds + 2)
+    if any(error in result.stdout for error in ('Failed', 'not available', 'No default controller')):
+        raise ValueError('Bluetooth no disponible')
+    return result.stdout
+
+
+def bluetooth_properties(output):
+    return dict(line.strip().split(': ', 1) for line in output.splitlines() if ': ' in line)
+
+
+def bluetooth_status():
+    controller = bluetooth_properties(bluetooth('show'))
+    rows = bluetooth('devices')
+    connected = bluetooth('devices', 'Connected')
+    paired = bluetooth('devices', 'Paired')
+    devices = []
+    for line in rows.splitlines():
+        match = re.fullmatch(r'Device ((?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}) (.+)', line)
+        if match:
+            address, name = match.groups()
+            devices.append({'address': address, 'name': name,
+                            'connected': f'Device {address} ' in connected,
+                            'paired': f'Device {address} ' in paired})
+    return {'powered': controller.get('Powered') == 'yes', 'devices': devices}
+
+
 def execute(data):
     action = data.get('action')
     if action == 'arby':
@@ -53,6 +81,26 @@ def execute(data):
                 networks.append(dict(zip(('ssid', 'signal', 'security'), fields)))
         return {'devices': [split_fields(line) for line in devices.splitlines()],
                 'addresses': addresses, 'connectivity': connectivity, 'networks': networks}
+    if action == 'bluetooth':
+        return bluetooth_status()
+    if action == 'bluetooth_scan':
+        bluetooth('power', 'on')
+        bluetooth('scan', 'on', seconds=8)
+        return bluetooth_status()
+    if action in ('bluetooth_connect', 'bluetooth_disconnect'):
+        address = data.get('address')
+        if not isinstance(address, str) or not re.fullmatch(r'(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}', address):
+            raise ValueError('Invalid Bluetooth address')
+        if action == 'bluetooth_disconnect':
+            bluetooth('disconnect', address, seconds=10)
+            return {'ok': True, 'message': 'Dispositivo desconectado.'}
+        info = bluetooth_properties(bluetooth('info', address))
+        if info.get('Paired') != 'yes':
+            result = run(['/usr/bin/bluetoothctl', '--agent', 'NoInputNoOutput', '--timeout', '15', 'pair', address], timeout=17)
+            if 'Pairing successful' not in result.stdout:
+                raise ValueError('Pairing failed')
+        bluetooth('connect', address, seconds=10)
+        return {'ok': True, 'message': 'Dispositivo conectado.'}
     if action == 'wifi':
         ssid, password = data.get('ssid'), data.get('password')
         if (not isinstance(ssid, str) or not 1 <= len(ssid.encode()) <= 32 or ssid.startswith('-')

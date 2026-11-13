@@ -1,10 +1,22 @@
 # Portal local de soporte
 
+Para el uso diario, consulta la [guía rápida ilustrada](GUIA_RAPIDA_PORTAL.md) o su [versión PDF](GUIA_RAPIDA_PORTAL.pdf).
+
 El portal vive en la Raspberry, funciona sin cargar recursos de internet y sigue
 respondiendo aunque Arby esté detenido. Abre `http://IP-DE-LA-RASPBERRY:8080` desde
 el celular en la misma red o `http://localhost:8080` en la pantalla local.
 No está diseñado para publicarse en internet. Usa una red local de confianza:
 el acceso HTTP local no cifra la clave en tránsito.
+
+## Direcciones de esta instalación
+
+- `http://100.101.87.24:8080`: desde dispositivos con acceso a esa red.
+- `http://10.42.0.1:8080`: conectado a la red Arby-Soporte.
+- `http://localhost:8080`: desde la propia Raspberry.
+
+Usa `ARBY_PORTAL_HOST=0.0.0.0` y `ARBY_PORTAL_PORT=8080` para que el
+servicio escuche en todas las interfaces IPv4. La disponibilidad de cada
+IP depende de que su interfaz esté activa y el dispositivo tenga acceso a esa red.
 
 ## Qué incluye
 
@@ -32,6 +44,42 @@ modelos y claves siguen en `.env`. Sin una selección de audio en el panel, los
 dispositivos conservan los valores de `.env`. Para volver a usar exclusivamente
 los valores del entorno en esos controles, con Arby detenido elimina la fila de
 `support_settings` (no la base de datos completa).
+
+## Acceder por todas las IP locales (puerto 8080)
+
+El servicio de este repositorio carga `/etc/arby/portal.env`. En la Raspberry,
+edita ese archivo conservando el hash de la clave y deja una sola definición de
+cada variable:
+
+```bash
+sudo nano /etc/arby/portal.env
+```
+
+```text
+ARBY_PORTAL_HOST=0.0.0.0
+ARBY_PORTAL_PORT=8080
+```
+
+Aplica y comprueba:
+
+```bash
+sudo systemctl restart arby-portal.service
+sudo systemctl status arby-portal.service --no-pager
+sudo ss -ltnp 'sport = :8080'
+hostname -I
+```
+
+La escucha debe aparecer como `0.0.0.0:8080`. Abre `http://127.0.0.1:8080`
+en la Raspberry o `http://IP-DE-LA-RASPBERRY:8080` desde otro equipo con acceso
+a esa red. Cada dirección IPv4 de la Raspberry puede servir el portal, según
+las rutas y el firewall. `0.0.0.0` es la dirección de escucha, no la URL para
+el navegador; esta configuración no habilita escucha en IPv6.
+
+Cambiar únicamente `portal.env` requiere reiniciar el servicio; no requiere
+`daemon-reload`. Si cambias el archivo `.service`, ejecuta antes
+`sudo systemctl daemon-reload`. Si la instalación usa otra unidad, consulta
+`sudo systemctl cat arby-portal.service` para identificar su `EnvironmentFile`.
+El puerto predeterminado del código es 8080; esta guía lo configura explícitamente.
 
 ## Selección estable de audio
 
@@ -190,3 +238,26 @@ El portal no expone esos registros porque pueden contener conversaciones.
 Si falta NetworkManager o hay problemas de permisos, el panel sigue disponible
 y muestra el fallo de la acción. No cambies la red de la Raspberry automáticamente
 al instalar este portal.
+
+## Bluetooth desde el portal
+
+El panel **Bluetooth**, dentro de **Conexión**, consulta el adaptador de la Raspberry, busca dispositivos
+(encendiendo el adaptador), empareja sin PIN, conecta y desconecta. Las acciones
+requieren la sesión de soporte y protección CSRF. Los dispositivos que requieren
+introducir o confirmar un PIN deben emparejarse previamente por SSH con
+`bluetoothctl`. La conexión no cambia automáticamente la selección de audio de Arby.
+
+En la Raspberry instala BlueZ y actualiza el helper después de traer estos cambios:
+
+```bash
+sudo apt install bluez
+sudo systemctl enable --now bluetooth
+sudo install -o root -g root -m 644 deploy/arby-system.py /usr/local/libexec/arby-system.py
+```
+
+Reinicia el portal (o vuelve a ejecutar el comando de desarrollo) y abre la sección
+**Conexión**, donde aparece el panel Bluetooth. El helper requiere los permisos sudo configurados en esta guía; iniciar
+solo Flask no concede acceso al Bluetooth. Si usas otra cuenta para desarrollo,
+las reglas de `arby-portal` no se aplican a esa cuenta.
+
+Implementación basada en los comandos de [BlueZ bluetoothctl](https://kernel.googlesource.com/pub/scm/bluetooth/bluez.git/+/a93047cd044fb17d687f43bef95289ec834876b2/doc/bluetoothctl.rst).

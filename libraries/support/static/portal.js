@@ -6,7 +6,7 @@ const views = {
   audio: ['Escuchar y hacerse escuchar.', 'Elige los dispositivos que Arby debe recordar.'],
   experience: ['A su propio ritmo.', 'Prepara el comportamiento y la iluminación para la feria.'],
   tests: ['Un momento para comprobar.', 'Prueba la voz, las expresiones y los colores de Arby.'],
-  network: ['Siempre cerca.', 'Revisa internet y la conexión del equipo.'],
+  network: ['Siempre cerca.', 'Administra la conexión Wi-Fi y los dispositivos Bluetooth del equipo.'],
   system: ['Cuidar del equipo.', 'Reinicia o apaga la Raspberry de forma ordenada.'],
 };
 const componentNames = {trill: 'Sensores Trill', microphone: 'Micrófono', speaker: 'Altavoz', eyes: 'Ojos', strip: 'Tira de luces'};
@@ -123,6 +123,7 @@ function navigate() {
   $('savebar').hidden = !['audio', 'experience'].includes(view);
   if (!$('portal').hidden) {
     if (view === 'audio' && (!audioInventory || Date.now() - audioChecked > 3000)) loadAudio().catch(error => notice(error.message, true));
+    if (view === 'network') $('refresh-bluetooth').click();
     if (view === 'network' && !networkLoaded) $('refresh-network').click();
   }
 }
@@ -440,6 +441,58 @@ $('wifi-form').addEventListener('submit', event => {
     notice(result.message);
   });
 });
+
+let bluetoothBusy = false;
+async function loadBluetooth(scan = false) {
+  if (bluetoothBusy) return;
+  bluetoothBusy = true;
+  $('refresh-bluetooth').disabled = $('scan-bluetooth').disabled = true;
+  $('bluetooth-devices').replaceChildren();
+  $('bluetooth-status').textContent = scan ? 'Buscando dispositivos cercanos…' : 'Consultando Bluetooth…';
+  try {
+    const result = await api(scan ? '/api/bluetooth/scan' : '/api/bluetooth', scan ? 'POST' : 'GET');
+    $('bluetooth-status').textContent = result.powered
+      ? (result.devices.length ? 'Bluetooth encendido. Elige un dispositivo.' : 'Sin dispositivos. Activa el modo de emparejamiento y busca de nuevo.')
+      : 'Bluetooth apagado. Pulsa Buscar dispositivos para encenderlo.';
+    for (const device of result.devices) {
+      const card = document.createElement('article');
+      card.className = 'card';
+      const name = document.createElement('strong');
+      name.textContent = device.name;
+      const state = document.createElement('p');
+      state.textContent = `${device.address} · ${device.connected ? 'Conectado' : device.paired ? 'Emparejado' : 'Sin emparejar'}`;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'secondary';
+      button.textContent = device.connected ? 'Desconectar' : 'Conectar';
+      button.addEventListener('click', () => guarded(button, async () => {
+        if (bluetoothBusy) return;
+        bluetoothBusy = true;
+        $('refresh-bluetooth').disabled = $('scan-bluetooth').disabled = true;
+        $('bluetooth-devices').querySelectorAll('button').forEach(item => item.disabled = true);
+        try {
+          const response = await api(`/api/bluetooth/${device.connected ? 'disconnect' : 'connect'}`, 'POST', {address: device.address});
+          notice(response.message);
+          audioInventory = null;
+        } finally {
+          bluetoothBusy = false;
+          await loadBluetooth();
+        }
+      }));
+      card.append(name, state, button);
+      $('bluetooth-devices').append(card);
+    }
+  } catch (error) {
+    $('bluetooth-status').textContent = error.message;
+    throw error;
+  } finally {
+    bluetoothBusy = false;
+    $('refresh-bluetooth').disabled = $('scan-bluetooth').disabled = false;
+  }
+}
+for (const [id, scan] of [['refresh-bluetooth', false], ['scan-bluetooth', true]]) {
+  $(id).addEventListener('click', () => guarded($(id), () => loadBluetooth(scan)));
+}
 
 (async () => {
   try {

@@ -87,7 +87,13 @@
 
       <section data-view="network" id="view-network" hidden>
         <article class="panel"><div class="section-title"><div><p class="eyebrow">CONEXIÓN DE LA FERIA</p><h2>Internet para conversar</h2></div><button id="refresh-network" class="secondary">↻ Actualizar redes</button></div><p id="network-status">Consulta las redes para comprobar la conexión.</p><form id="wifi-form" class="wifi-form"><div><label for="ssid">Red Wi-Fi de internet · wlan0</label><input id="ssid" list="networks" required maxlength="32" autocomplete="off"><datalist id="networks"></datalist></div><div><label for="wifi-password">Contraseña de la red</label><input id="wifi-password" type="password" autocomplete="off" maxlength="128"></div><button type="submit">Conectar</button></form></article>
-        <div class="callout"><strong>Dos conexiones, dos funciones</strong><p>La Wi-Fi interna, wlan0, se usa para internet. La red Arby-Soporte del adaptador USB, wlan1, permite entrar al panel cuando está configurada y activa.</p><p class="hint">Esta pantalla cambia únicamente la conexión de internet. Si estás entrando por esa misma red, puedes perder temporalmente el acceso.</p></div>
+        <div class="callout"><strong>Dos conexiones, dos funciones</strong><p>La Wi-Fi interna, wlan0, se usa para internet. La red Arby-Soporte del adaptador USB, wlan1, permite entrar al panel cuando está configurada y activa.</p><p class="hint">El formulario Wi-Fi cambia únicamente la conexión de internet. Si estás entrando por esa misma red, puedes perder temporalmente el acceso.</p></div>
+        <article class="panel">
+          <div class="section-title"><h2>Dispositivos Bluetooth</h2><div class="actions"><button id="refresh-bluetooth" class="secondary" type="button">Actualizar estado</button><button id="scan-bluetooth" type="button">Buscar dispositivos</button></div></div>
+          <p id="bluetooth-status" role="status" aria-live="polite">Consulta el adaptador de la Raspberry.</p>
+          <div id="bluetooth-devices" class="cards"></div>
+        </article>
+        <div class="callout"><strong>Conecta un dispositivo a Arby</strong><p>Activa el modo de emparejamiento del dispositivo y pulsa Buscar dispositivos. La búsqueda tarda unos segundos y enciende el Bluetooth de la Raspberry.</p><p class="hint">Si el dispositivo requiere introducir o confirmar un PIN, empareja primero por SSH. Para usar un altavoz conectado, revisa después Audio y dispositivos.</p></div>
       </section>
 
       <section data-view="system" id="view-system" hidden>

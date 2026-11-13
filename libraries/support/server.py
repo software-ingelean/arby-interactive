@@ -24,7 +24,7 @@ def system_action(action, **values):
     import json
     try:
         result = subprocess.run(SYSTEM_HELPER, input=json.dumps({'action': action, **values}),
-                                capture_output=True, text=True, timeout=35, check=False)
+                                capture_output=True, text=True, timeout=38, check=False)
         if result.returncode:
             raise ValueError('No se pudo completar la acción. Revisa permisos, conexión o servicio por SSH.')
         return json.loads(result.stdout)
@@ -166,6 +166,22 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
     def network_connect():
         data = body()
         return jsonify(system('wifi', ssid=data.get('ssid'), password=data.get('password', '')))
+
+    @app.get('/api/bluetooth')
+    def bluetooth_status():
+        return jsonify(system('bluetooth'))
+
+    @app.post('/api/bluetooth/<operation>')
+    def bluetooth_action(operation):
+        if operation not in ('scan', 'connect', 'disconnect'):
+            raise ValueError('Acción Bluetooth no permitida.')
+        if operation == 'scan':
+            return jsonify(system('bluetooth_scan'))
+        import re
+        address = body().get('address')
+        if not isinstance(address, str) or not re.fullmatch(r'(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}', address):
+            raise ValueError('Dirección Bluetooth inválida.')
+        return jsonify(system('bluetooth_' + operation, address=address))
 
     @app.post('/api/restart')
     def restart():

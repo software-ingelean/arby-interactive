@@ -186,6 +186,22 @@ class SupportTests(unittest.TestCase):
         self.assertEqual(config.microphone.gain_db, 9)
         self.assertTrue(config.mute)
 
+    def test_bluetooth_auth_validation_and_actions(self):
+        self.assertEqual(self.client.get('/api/bluetooth').status_code, 401)
+        self.assertEqual(self.request('/api/bluetooth/scan').status_code, 401)
+        self.login()
+        self.assertEqual(self.client.post('/api/bluetooth/scan', json={}).status_code, 403)
+        for operation, data in [('shell', {}), ('connect', {'address': '--help'}), ('disconnect', {'address': []})]:
+            self.assertEqual(self.request('/api/bluetooth/' + operation, data).status_code, 400)
+        self.system.assert_not_called()
+        self.assertEqual(self.client.get('/api/bluetooth').status_code, 200)
+        self.system.assert_called_with('bluetooth')
+        self.assertEqual(self.request('/api/bluetooth/scan').status_code, 200)
+        self.system.assert_called_with('bluetooth_scan')
+        for operation in ('connect', 'disconnect'):
+            self.assertEqual(self.request('/api/bluetooth/' + operation, {'address': 'AA:BB:CC:DD:EE:FF'}).status_code, 200)
+            self.system.assert_called_with('bluetooth_' + operation, address='AA:BB:CC:DD:EE:FF')
+
     def test_restart_allowlist(self):
         self.login()
         self.assertEqual(self.request('/api/restart', {'target': 'anything'}).status_code, 400)
@@ -261,6 +277,28 @@ class HelperTests(unittest.TestCase):
             with self.assertRaises(ValueError), patch.object(self.helper, 'run') as run:
                 self.helper.execute(payload)
             run.assert_not_called()
+
+    def test_bluetooth_rejects_invalid_addresses_before_running(self):
+        for address in ('--help', 'AA:BB:CC:DD:EE:FF\n', None, ['AA']):
+            with patch.object(self.helper, 'run') as run, self.assertRaises(ValueError):
+                self.helper.execute({'action': 'bluetooth_connect', 'address': address})
+            run.assert_not_called()
+
+    def test_bluetooth_does_not_repair_existing_pairing(self):
+        with patch.object(self.helper, 'bluetooth', return_value='Paired: yes') as command:
+            self.helper.execute({'action': 'bluetooth_connect', 'address': 'AA:BB:CC:DD:EE:FF'})
+        self.assertEqual(command.call_args.args, ('connect', 'AA:BB:CC:DD:EE:FF'))
+        self.assertEqual(command.call_count, 2)
+
+    def test_bluetooth_status_parses_names_and_states(self):
+        with patch.object(self.helper, 'bluetooth', side_effect=[
+            'Controller AA:BB:CC:DD:EE:00 Raspberry\n\tPowered: yes',
+            'Device AA:BB:CC:DD:EE:FF Altavoz de Arby',
+            'Device AA:BB:CC:DD:EE:FF Altavoz de Arby', '',
+        ]):
+            result = self.helper.bluetooth_status()
+        self.assertTrue(result['powered'])
+        self.assertEqual(result['devices'][0], {'address': 'AA:BB:CC:DD:EE:FF', 'name': 'Altavoz de Arby', 'connected': True, 'paired': False})
 
     def test_password_is_not_a_process_argument(self):
         with patch.object(self.helper, 'run') as run:
