@@ -352,8 +352,22 @@ class HelperTests(unittest.TestCase):
             self.helper.execute({'action': 'wifi', 'ssid': 'Fair', 'password': 'secret-123'})
         args = run.call_args.args[0]
         self.assertNotIn('secret-123', args)
-        self.assertIn('--passwd-file', args)
-        self.assertFalse(Path(args[args.index('--passwd-file') + 1]).exists())
+        self.assertIn('--ask', args)
+        self.assertNotIn('--passwd-file', args)
+        self.assertEqual(run.call_args.kwargs['input'], 'secret-123\n')
+
+    def test_wifi_failure_returns_safe_code_without_credentials(self):
+        import subprocess
+        failure = subprocess.CalledProcessError(4, ['nmcli'], stderr='password secret-123 missing')
+        with patch.object(self.helper, 'run', side_effect=failure):
+            result = self.helper.execute({'action': 'wifi', 'ssid': 'Fair', 'password': 'secret-123'})
+        self.assertEqual(result, {'error_code': 'wifi_credentials'})
+
+    def test_wifi_timeout_returns_safe_code(self):
+        import subprocess
+        with patch.object(self.helper, 'run', side_effect=subprocess.TimeoutExpired(['nmcli'], 25)):
+            result = self.helper.execute({'action': 'wifi', 'ssid': 'Fair', 'password': 'secret-123'})
+        self.assertEqual(result, {'error_code': 'wifi_timeout'})
 
     def test_nmcli_escaped_ssid_fields(self):
         self.assertEqual(self.helper.split_fields(r'Fair\: Booth:80:WPA2'), ['Fair: Booth', '80', 'WPA2'])

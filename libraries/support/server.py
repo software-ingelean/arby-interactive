@@ -29,9 +29,18 @@ def system_action(action, **values):
                                 capture_output=True, text=True, timeout=38, check=False)
         if result.returncode:
             raise ValueError('No se pudo completar la acción. Revisa permisos, conexión o servicio por SSH.')
-        return json.loads(result.stdout)
+        payload = json.loads(result.stdout)
     except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
         raise ValueError('Acción no disponible. Revisa la instalación y la conexión por SSH.') from exc
+    messages = {
+        'wifi_timeout': 'La conexión tardó demasiado. Comprueba la señal e intenta de nuevo.',
+        'wifi_not_found': 'La red ya no está disponible. Pulsa Buscar redes y vuelve a seleccionarla.',
+        'wifi_credentials': 'No se pudieron validar las credenciales. Revisa la contraseña y el tipo de seguridad de la red.',
+        'wifi_failed': 'No se pudo activar la conexión Wi-Fi. Revisa la contraseña, la señal y la configuración del router.',
+    }
+    if payload.get('error_code') in messages:
+        raise ValueError(messages[payload['error_code']])
+    return payload
 
 
 def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_action):

@@ -8,12 +8,11 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 
 
-def run(args, timeout=25):
+def run(args, timeout=25, input=None):
     return subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=True,
-                          env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'})
+                          input=input, env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'})
 
 
 def split_fields(line):
@@ -107,12 +106,21 @@ def execute(data):
                 or not isinstance(password, str) or len(password) > 128
                 or any(c in ssid + password for c in '\r\n\x00')):
             raise ValueError('Invalid Wi-Fi parameters')
-        # The password is never a process argument or a log entry.
-        with tempfile.NamedTemporaryFile(mode='w', prefix='arby-wifi-') as credentials:
-            credentials.write('802-11-wireless-security.psk:' + password + '\n')
-            credentials.flush()
-            run(['/usr/bin/nmcli', '--wait', '20', '--passwd-file', credentials.name,
-                 'device', 'wifi', 'connect', ssid, 'ifname', 'wlan0'])
+        # Answer nmcli's secret prompt through stdin, never argv or logs.
+        # passwd-file belongs to `connection up`, not `device wifi connect`.
+        try:
+            run(['/usr/bin/nmcli', '--wait', '20', '--ask',
+                 'device', 'wifi', 'connect', ssid, 'ifname', 'wlan0'],
+                input=password + '\n')
+        except subprocess.TimeoutExpired:
+            return {'error_code': 'wifi_timeout'}
+        except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or '').lower()
+            if 'no network with ssid' in detail:
+                return {'error_code': 'wifi_not_found'}
+            if 'secrets' in detail or 'password' in detail:
+                return {'error_code': 'wifi_credentials'}
+            return {'error_code': 'wifi_failed'}
         return {'ok': True, 'message': 'Conexión solicitada. Busca la nueva IP si el panel se desconecta.'}
     raise ValueError('Unsupported action')
 
