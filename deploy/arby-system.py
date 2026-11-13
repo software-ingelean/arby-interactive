@@ -102,6 +102,13 @@ def execute(data):
         return bluetooth_status()
     if action == 'bluetooth_scan':
         bluetooth('power', 'on')
+        # Give classic discovery its own window for headphones, then include
+        # LE devices as well. Names are resolved by BlueZ during discovery.
+        try:
+            bluetooth('scan', 'bredr', seconds=8)
+        except (ValueError, subprocess.CalledProcessError):
+            # Some controllers only support LE; retain general discovery.
+            pass
         bluetooth('scan', 'on', seconds=8)
         return bluetooth_status()
     if action in ('bluetooth_connect', 'bluetooth_disconnect'):

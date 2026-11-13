@@ -249,8 +249,10 @@ introducir o confirmar un PIN deben emparejarse previamente por SSH con
 
 La lista muestra el nombre anunciado por el dispositivo y consulta su nombre o alias
 si BlueZ devuelve una dirección como etiqueta. La MAC queda en **Identificador del
-dispositivo**, un detalle desplegable. Si aparece **Dispositivo sin nombre**, activa
-su modo de emparejamiento y vuelve a buscar; algunos equipos no anuncian su nombre.
+dispositivo**, un detalle desplegable. Los dispositivos sin nombre se omiten de la
+lista de conexión; el panel indica cuántos se omitieron. Activa el modo de
+emparejamiento y vuelve a buscar si falta el tuyo. Un equipo ya conectado permanece
+visible aunque no anuncie nombre, para permitir desconectarlo.
 
 En la Raspberry instala BlueZ y actualiza el helper después de traer estos cambios:
 

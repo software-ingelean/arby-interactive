@@ -325,6 +325,20 @@ class HelperTests(unittest.TestCase):
                 self.helper.execute(payload)
             run.assert_not_called()
 
+    def test_bluetooth_scan_includes_classic_and_general_discovery(self):
+        with patch.object(self.helper, 'bluetooth') as command, patch.object(self.helper, 'bluetooth_status', return_value={'devices': []}):
+            self.helper.execute({'action': 'bluetooth_scan'})
+        self.assertEqual(command.call_args_list, [
+            unittest.mock.call('power', 'on'),
+            unittest.mock.call('scan', 'bredr', seconds=8),
+            unittest.mock.call('scan', 'on', seconds=8),
+        ])
+
+    def test_bluetooth_scan_falls_back_when_classic_is_unavailable(self):
+        with patch.object(self.helper, 'bluetooth', side_effect=[None, ValueError('Unsupported'), None]) as command, patch.object(self.helper, 'bluetooth_status', return_value={'devices': []}):
+            self.helper.execute({'action': 'bluetooth_scan'})
+        self.assertEqual(command.call_args, unittest.mock.call('scan', 'on', seconds=8))
+
     def test_bluetooth_rejects_invalid_addresses_before_running(self):
         for address in ('--help', 'AA:BB:CC:DD:EE:FF\n', None, ['AA']):
             with patch.object(self.helper, 'run') as run, self.assertRaises(ValueError):

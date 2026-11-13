@@ -542,24 +542,32 @@ $('wifi-form').addEventListener('submit', event => {
 });
 
 let bluetoothBusy = false;
+function identifiableBluetoothDevice(device) {
+  const name = (device.name || '').trim();
+  return Boolean(name && name !== 'Dispositivo sin nombre'
+    && !/^(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/i.test(name));
+}
+
 async function loadBluetooth(scan = false) {
   if (bluetoothBusy) return;
   bluetoothBusy = true;
   $('refresh-bluetooth').disabled = $('scan-bluetooth').disabled = true;
   $('bluetooth-devices').replaceChildren();
-  $('bluetooth-status').textContent = scan ? 'Buscando dispositivos cercanos…' : 'Consultando Bluetooth…';
+  $('bluetooth-status').textContent = scan ? 'Buscando dispositivos y sus nombres… Pon tus audífonos en modo de emparejamiento. Puede tardar unos 25 segundos.' : 'Consultando Bluetooth…';
   try {
     const result = await api(scan ? '/api/bluetooth/scan' : '/api/bluetooth', scan ? 'POST' : 'GET');
-    const unnamed = result.devices.some(device => device.name === 'Dispositivo sin nombre');
+    const devices = result.devices.filter(device => identifiableBluetoothDevice(device) || device.connected);
+    const hiddenCount = result.devices.length - devices.length;
     $('bluetooth-status').textContent = result.powered
-      ? (result.devices.length ? 'Bluetooth encendido. Elige un dispositivo.' : 'Sin dispositivos. Activa el modo de emparejamiento y busca de nuevo.')
+      ? (devices.length ? 'Bluetooth encendido. Elige tu dispositivo por su nombre.' : 'No se encontraron dispositivos con nombre. Activa el modo de emparejamiento del equipo y pulsa Buscar dispositivos.')
       : 'Bluetooth apagado. Pulsa Buscar dispositivos para encenderlo.';
-    if (result.powered && unnamed) $('bluetooth-status').textContent += ' Algunos dispositivos aún no anuncian su nombre. Activa su modo de emparejamiento y pulsa Buscar dispositivos de nuevo.';
-    for (const device of result.devices.sort((a, b) => Number(b.connected) - Number(a.connected) || Number(b.paired) - Number(a.paired) || a.name.localeCompare(b.name))) {
+    if (result.powered && hiddenCount) $('bluetooth-status').textContent += ` Se omitieron ${hiddenCount} dispositivos sin identificar. Si falta el tuyo, activa su modo de emparejamiento y vuelve a buscar.`;
+    for (const device of devices.sort((a, b) => Number(b.connected) - Number(a.connected) || Number(b.paired) - Number(a.paired) || (a.name || '').localeCompare(b.name || ''))) {
+      const displayName = identifiableBluetoothDevice(device) ? device.name : 'Dispositivo conectado sin nombre';
       const card = document.createElement('article');
       card.className = 'card bluetooth-device';
       const name = document.createElement('strong');
-      name.textContent = device.name;
+      name.textContent = displayName;
       const state = document.createElement('p');
       state.textContent = device.connected ? 'Conectado' : device.paired ? 'Emparejado' : 'Sin emparejar';
       const details = document.createElement('details');
@@ -572,12 +580,12 @@ async function loadBluetooth(scan = false) {
       button.type = 'button';
       button.className = 'secondary';
       button.textContent = device.connected ? 'Desconectar' : device.paired ? 'Conectar' : 'Emparejar y conectar';
-      button.setAttribute('aria-label', `${button.textContent} ${device.name}`);
+      button.setAttribute('aria-label', `${button.textContent} ${displayName}`);
       button.addEventListener('click', () => guarded(button, async () => {
         if (bluetoothBusy) return;
         bluetoothBusy = true;
         button.textContent = device.connected ? 'Desconectando…' : 'Conectando…';
-        $('bluetooth-status').textContent = `${device.connected ? 'Desconectando' : 'Conectando'} ${device.name}…`;
+        $('bluetooth-status').textContent = `${device.connected ? 'Desconectando' : 'Conectando'} ${displayName}…`;
         $('refresh-bluetooth').disabled = $('scan-bluetooth').disabled = true;
         $('bluetooth-devices').querySelectorAll('button').forEach(item => item.disabled = true);
         try {
