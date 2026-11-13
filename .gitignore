@@ -71,6 +71,12 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 
+# Local Arby settings and SQLite sidecar files
+/config/arby_settings.sqlite3
+/config/arby_settings.sqlite3-journal
+/config/arby_settings.sqlite3-wal
+/config/arby_settings.sqlite3-shm
+
 # Flask stuff:
 instance/
 .webassets-cache
