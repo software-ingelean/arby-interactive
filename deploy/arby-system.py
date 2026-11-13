@@ -32,10 +32,17 @@ def split_fields(line):
     return fields + [current]
 
 
+class BluetoothFailure(ValueError):
+    pass
+
+
 def bluetooth(command, *args, seconds=4):
-    result = run(['/usr/bin/bluetoothctl', '--timeout', str(seconds), command, *args], timeout=seconds + 2)
+    try:
+        result = run(['/usr/bin/bluetoothctl', '--timeout', str(seconds), command, *args], timeout=seconds + 2)
+    except subprocess.CalledProcessError as exc:
+        raise BluetoothFailure((exc.stdout or '') + '\n' + (exc.stderr or '')) from exc
     if any(error in result.stdout for error in ('Failed', 'not available', 'No default controller')):
-        raise ValueError('Bluetooth no disponible')
+        raise BluetoothFailure(result.stdout)
     return result.stdout
 
 
@@ -115,15 +122,41 @@ def execute(data):
         address = data.get('address')
         if not isinstance(address, str) or not re.fullmatch(r'(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}', address):
             raise ValueError('Invalid Bluetooth address')
-        if action == 'bluetooth_disconnect':
-            bluetooth('disconnect', address, seconds=10)
-            return {'ok': True, 'message': 'Dispositivo desconectado.'}
-        info = bluetooth_properties(bluetooth('info', address))
-        if info.get('Paired') != 'yes':
-            result = run(['/usr/bin/bluetoothctl', '--agent', 'NoInputNoOutput', '--timeout', '15', 'pair', address], timeout=17)
-            if 'Pairing successful' not in result.stdout:
-                raise ValueError('Pairing failed')
-        bluetooth('connect', address, seconds=10)
+        stage = 'disconnect' if action == 'bluetooth_disconnect' else 'connect'
+        try:
+            if action == 'bluetooth_disconnect':
+                bluetooth('disconnect', address, seconds=10)
+                return {'ok': True, 'message': 'Dispositivo desconectado.'}
+            bluetooth('power', 'on')
+            info = bluetooth_properties(bluetooth('info', address))
+            if info.get('Paired') != 'yes':
+                stage = 'pair'
+                try:
+                    result = run(['/usr/bin/bluetoothctl', '--agent', 'NoInputNoOutput', '--timeout', '15', 'pair', address], timeout=17)
+                except subprocess.CalledProcessError as exc:
+                    raise BluetoothFailure((exc.stdout or '') + '\n' + (exc.stderr or '')) from exc
+                if 'Pairing successful' not in result.stdout:
+                    raise BluetoothFailure(result.stdout)
+            stage = 'connect'
+            bluetooth('trust', address)
+            bluetooth('connect', address, seconds=10)
+            if bluetooth_properties(bluetooth('info', address)).get('Connected') != 'yes':
+                return {'error_code': 'bluetooth_connect_failed'}
+        except subprocess.TimeoutExpired:
+            return {'error_code': 'bluetooth_timeout'}
+        except BluetoothFailure as exc:
+            detail = str(exc).lower()
+            if 'no default controller' in detail or 'notready' in detail:
+                code = 'bluetooth_unavailable'
+            elif 'not available' in detail or 'doesnotexist' in detail:
+                code = 'bluetooth_not_found'
+            elif 'authentication' in detail or 'rejected' in detail:
+                code = 'bluetooth_auth_failed'
+            elif 'br-connection-profile-unavailable' in detail:
+                code = 'bluetooth_audio_unavailable'
+            else:
+                code = 'bluetooth_' + stage + '_failed'
+            return {'error_code': code}
         return {'ok': True, 'message': 'Dispositivo conectado.'}
     if action == 'wifi':
         ssid, password = data.get('ssid'), data.get('password')

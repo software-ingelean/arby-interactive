@@ -26,13 +26,21 @@ def system_action(action, **values):
     import json
     try:
         result = subprocess.run(SYSTEM_HELPER, input=json.dumps({'action': action, **values}),
-                                capture_output=True, text=True, timeout=38, check=False)
+                                capture_output=True, text=True, timeout=55 if action == 'bluetooth_connect' else 38, check=False)
         if result.returncode:
             raise ValueError('No se pudo completar la acción. Revisa permisos, conexión o servicio por SSH.')
         payload = json.loads(result.stdout)
     except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
         raise ValueError('Acción no disponible. Revisa la instalación y la conexión por SSH.') from exc
     messages = {
+        'bluetooth_timeout': 'Bluetooth tardó demasiado. Acerca el dispositivo, activa el modo de emparejamiento y vuelve a intentar.',
+        'bluetooth_unavailable': 'El adaptador Bluetooth no está disponible o no está encendido.',
+        'bluetooth_not_found': 'El dispositivo ya no está disponible. Activa su modo de emparejamiento y pulsa Buscar dispositivos.',
+        'bluetooth_auth_failed': 'El dispositivo rechazó el emparejamiento. Desconéctalo del celular y activa su modo de emparejamiento. Si requiere PIN o confirmación, este portal todavía no admite ese paso.',
+        'bluetooth_pair_failed': 'No se pudo emparejar. Activa el modo de emparejamiento del dispositivo y vuelve a intentar.',
+        'bluetooth_connect_failed': 'No se pudo conectar. Comprueba que el dispositivo esté cerca y desconectado de otros equipos.',
+        'bluetooth_disconnect_failed': 'No se pudo desconectar el dispositivo. Actualiza su estado y vuelve a intentar.',
+        'bluetooth_audio_unavailable': 'El dispositivo se detectó, pero el sistema no tiene disponible su perfil de audio Bluetooth.',
         'wifi_timeout': 'La conexión tardó demasiado. Comprueba la señal e intenta de nuevo.',
         'wifi_not_found': 'La red ya no está disponible. Pulsa Buscar redes y vuelve a seleccionarla.',
         'wifi_credentials': 'No se pudieron validar las credenciales. Revisa la contraseña y el tipo de seguridad de la red.',

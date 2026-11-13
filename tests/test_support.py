@@ -311,6 +311,12 @@ class SupportTests(unittest.TestCase):
                 system_action('wifi', ssid='fair', password='password')
         self.assertNotIn('password', str(caught.exception))
 
+    def test_bluetooth_error_reaches_portal_without_raw_output(self):
+        with patch('libraries.support.server.subprocess.run', return_value=SimpleNamespace(
+                returncode=0, stdout='{"error_code":"bluetooth_auth_failed"}', stderr='private device details')):
+            with self.assertRaisesRegex(ValueError, 'rechazó el emparejamiento'):
+                system_action('bluetooth_connect', address='AA:BB:CC:DD:EE:FF')
+
 
 class HelperTests(unittest.TestCase):
     @classmethod
@@ -346,10 +352,39 @@ class HelperTests(unittest.TestCase):
             run.assert_not_called()
 
     def test_bluetooth_does_not_repair_existing_pairing(self):
-        with patch.object(self.helper, 'bluetooth', return_value='Paired: yes') as command:
-            self.helper.execute({'action': 'bluetooth_connect', 'address': 'AA:BB:CC:DD:EE:FF'})
-        self.assertEqual(command.call_args.args, ('connect', 'AA:BB:CC:DD:EE:FF'))
-        self.assertEqual(command.call_count, 2)
+        with patch.object(self.helper, 'bluetooth', side_effect=['', 'Paired: yes', '', '', 'Connected: yes']), patch.object(self.helper, 'run') as run:
+            result = self.helper.execute({'action': 'bluetooth_connect', 'address': 'AA:BB:CC:DD:EE:FF'})
+        self.assertTrue(result['ok'])
+        run.assert_not_called()
+
+    def test_bluetooth_pairs_then_verifies_connection(self):
+        with patch.object(self.helper, 'bluetooth', side_effect=['', 'Paired: no', '', '', 'Connected: yes']), patch.object(self.helper, 'run', return_value=SimpleNamespace(stdout='Pairing successful')) as run:
+            result = self.helper.execute({'action': 'bluetooth_connect', 'address': 'AA:BB:CC:DD:EE:FF'})
+        self.assertTrue(result['ok'])
+        self.assertIn('NoInputNoOutput', run.call_args.args[0])
+
+    def test_bluetooth_does_not_report_success_if_disconnected(self):
+        with patch.object(self.helper, 'bluetooth', side_effect=['', 'Paired: yes', '', '', 'Connected: no']):
+            result = self.helper.execute({'action': 'bluetooth_connect', 'address': 'AA:BB:CC:DD:EE:FF'})
+        self.assertEqual(result, {'error_code': 'bluetooth_connect_failed'})
+
+    def test_bluetooth_pair_failure_is_safe_and_specific(self):
+        import subprocess
+        failure = subprocess.CalledProcessError(1, ['bluetoothctl'], output='Failed to pair: org.bluez.Error.AuthenticationFailed PRIVATE')
+        with patch.object(self.helper, 'bluetooth', side_effect=['', 'Paired: no']), patch.object(self.helper, 'run', side_effect=failure):
+            result = self.helper.execute({'action': 'bluetooth_connect', 'address': 'AA:BB:CC:DD:EE:FF'})
+        self.assertEqual(result, {'error_code': 'bluetooth_auth_failed'})
+
+    def test_bluetooth_connection_errors_are_classified(self):
+        import subprocess
+        for failure, code in [
+            (self.helper.BluetoothFailure('br-connection-profile-unavailable'), 'bluetooth_audio_unavailable'),
+            (self.helper.BluetoothFailure('Device not available'), 'bluetooth_not_found'),
+            (subprocess.TimeoutExpired(['bluetoothctl'], 10), 'bluetooth_timeout'),
+        ]:
+            with self.subTest(code=code), patch.object(self.helper, 'bluetooth', side_effect=['', 'Paired: yes', '', failure]):
+                result = self.helper.execute({'action': 'bluetooth_connect', 'address': 'AA:BB:CC:DD:EE:FF'})
+            self.assertEqual(result, {'error_code': code})
 
     def test_bluetooth_status_parses_names_and_states(self):
         with patch.object(self.helper, 'bluetooth', side_effect=[

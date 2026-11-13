@@ -71,7 +71,7 @@ async function api(url, method = 'GET', data, retried = false) {
     method,
     headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
     body: data === undefined ? undefined : JSON.stringify(data),
-    signal: AbortSignal.timeout(40000),
+    signal: AbortSignal.timeout(url === '/api/bluetooth/connect' ? 60000 : 40000),
   });
   const payload = await response.json().catch(() => ({error: 'Respuesta inesperada. Recarga la página.'}));
   if (!response.ok) {
@@ -588,13 +588,21 @@ async function loadBluetooth(scan = false) {
         $('bluetooth-status').textContent = `${device.connected ? 'Desconectando' : 'Conectando'} ${displayName}…`;
         $('refresh-bluetooth').disabled = $('scan-bluetooth').disabled = true;
         $('bluetooth-devices').querySelectorAll('button').forEach(item => item.disabled = true);
+        let actionError = '';
         try {
           const response = await api(`/api/bluetooth/${device.connected ? 'disconnect' : 'connect'}`, 'POST', {address: device.address});
           notice(response.message);
           audioInventory = null;
+        } catch (error) {
+          actionError = error.message;
+          throw error;
         } finally {
           bluetoothBusy = false;
-          await loadBluetooth();
+          try {
+            await loadBluetooth();
+          } finally {
+            if (actionError) $('bluetooth-status').textContent = actionError;
+          }
         }
       }));
       card.append(name, state, button, details);
