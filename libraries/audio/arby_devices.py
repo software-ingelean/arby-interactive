@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import re
 import sqlite3
+import subprocess
 
 from libraries.core.arby_ambient import DEFAULT_DATABASE
 
@@ -83,12 +84,63 @@ def discover_devices(proc=Path('/proc/asound'), sound=Path('/sys/class/sound')):
                 devices.append({'id': f'{role}-{device_key(identity)}', 'role': role,
                                 'name': identity['name'], 'identity': identity, 'card': card,
                                 'detail': f"{driver} · {identity['port']} · PCM {pcm}"})
+    if proc == Path('/proc/asound') and sound == Path('/sys/class/sound'):
+        devices.extend(discover_bluetooth_outputs())
+    return devices
+
+
+def command_output(argv):
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, check=True, timeout=3).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ''
+
+
+def bluetooth_output(driver, name, address, endpoint):
+    identity = {'driver': driver, 'name': name, 'vendor': '', 'product': '',
+                'serial': address.upper(), 'port': endpoint, 'pcm': 0}
+    return {'id': f'output-{device_key(identity)}', 'role': 'output', 'name': name,
+            'identity': identity, 'detail': f'Bluetooth · {driver} · {address}'}
+
+
+def discover_bluetooth_outputs():
+    """List playback endpoints exposed to this service, without opening audio."""
+    devices = []
+    try:
+        sinks = json.loads(command_output(['pactl', '--format=json', 'list', 'sinks']) or '[]')
+    except (ValueError, TypeError):
+        sinks = []
+    for sink in sinks if isinstance(sinks, list) else []:
+        if not isinstance(sink, dict):
+            continue
+        endpoint = sink.get('name', '')
+        if not isinstance(endpoint, str) or not endpoint.startswith(('bluez_output.', 'bluez_sink.')):
+            continue
+        match = re.search(r'((?:[0-9A-Fa-f]{2}_){5}[0-9A-Fa-f]{2})', endpoint)
+        if match:
+            devices.append(bluetooth_output('pulse-bluetooth', sink.get('description') or endpoint,
+                                            match[1].replace('_', ':'), endpoint))
+    rows = command_output(['bluealsa-aplay', '-L']).splitlines()
+    for index, row in enumerate(rows):
+        match = re.fullmatch(r'bluealsa:DEV=((?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}),PROFILE=(a2dp|sco),SRV=([A-Za-z0-9_.-]+)', row)
+        if not match or index + 1 >= len(rows):
+            continue
+        description = rows[index + 1].strip()
+        if not description.endswith(', playback'):
+            continue
+        address = match[1]
+        devices.append(bluetooth_output('bluealsa', description.split(',')[0], address, row))
     return devices
 
 
 def find_preferred(preference, role, devices):
     """Prefer serial, then physical port, then an unambiguous model match."""
-    keys = ('driver', 'name', 'vendor', 'product', 'pcm')
+    if preference['driver'] == 'pulse-bluetooth':
+        keys = ('driver', 'serial', 'pcm')
+    elif preference['driver'] == 'bluealsa':
+        keys = ('driver', 'serial', 'port', 'pcm')
+    else:
+        keys = ('driver', 'name', 'vendor', 'product', 'pcm')
     candidates = [d for d in devices if d['role'] == role and
                   all(d['identity'][key] == preference[key] for key in keys)]
     if preference['serial']:
@@ -133,14 +185,19 @@ def apply_selection(config, selection, *, devices=None, sounddevice=None):
         active['input'] = {'name': device['name'], 'detail': device['detail']}
     if selection['output'] is not None and not config.mute:
         device = find_preferred(selection['output'], 'output', devices)
-        card_id = read_text(Path('/proc/asound') / f"card{device['card']}" / 'id')
+        card_id = read_text(Path('/proc/asound') / f"card{device['card']}" / 'id') if 'card' in device else ''
         # Use the current ALSA identifier where available, matching existing recovery rules.
-        if card_id and re.fullmatch(r'[A-Za-z0-9_]+', card_id):
+        if device['identity']['driver'] in ('bluealsa', 'pulse-bluetooth'):
+            config.audio_device = device['identity']['port']
+        elif card_id and re.fullmatch(r'[A-Za-z0-9_]+', card_id):
             config.audio_device = f"plughw:CARD={card_id},DEV={device['identity']['pcm']}"
         else:
             config.audio_device = f"plughw:{device['card']},{device['identity']['pcm']}"
-        config.audio_driver = 'alsa'
+        config.audio_driver = 'pulseaudio' if device['identity']['driver'] == 'pulse-bluetooth' else 'alsa'
         active['output'] = {'name': device['name'], 'detail': device['detail']}
+    if selection['output'] is not None and selection['output']['driver'] in ('bluealsa', 'pulse-bluetooth'):
+        # Jack recovery applies only to the physical Headphones output.
+        config.audio_recover_on_exit = False
     if config.audio_recover_on_exit and (config.audio_driver != 'alsa' or config.audio_device != 'plughw:CARD=Headphones,DEV=0'):
         raise ValueError('La recuperación del jack requiere seleccionar Headphones o desactivar ARBY_AUDIO_RECOVER_ON_EXIT.')
     return active
@@ -159,5 +216,5 @@ def inventory(selection, devices=None):
         except ValueError as exc:
             preferred[role] = {'state': 'unavailable', 'message': str(exc)}
     return {'devices': devices, 'preferred': preferred,
-            'message': 'Dispositivos físicos de la Raspberry. No se abren ni se interrumpe el audio.' if devices else
-                       'No se detectaron dispositivos ALSA. Puedes conservar .env y volver a buscar en la Raspberry.'}
+            'message': 'Audio de la Raspberry, incluidas salidas Bluetooth conectadas y disponibles para este servicio. Si falta una, conéctala en Conexión y comprueba BlueALSA o PulseAudio/PipeWire.' if devices else
+                       'No se detectaron dispositivos de audio. Para Bluetooth, conecta el altavoz en Conexión y comprueba que BlueALSA o PulseAudio/PipeWire esté disponible para el servicio de Arby.'}

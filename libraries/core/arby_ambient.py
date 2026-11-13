@@ -28,8 +28,11 @@ class AmbientSettings:
     gesture_max_seconds: float = 120
     invitation_min_seconds: float = 300
     invitation_max_seconds: float = 420
+    phrases_enabled: bool = True
 
     def __post_init__(self):
+        if type(self.phrases_enabled) is not bool:
+            raise ValueError("La opción de frases periódicas debe ser booleana.")
         if self.mode not in MODES:
             raise ValueError("El modo debe ser oficina o evento.")
         for low, high in (self.gesture_range, self.invitation_range):
@@ -51,6 +54,8 @@ def load_ambient_settings(database=DEFAULT_DATABASE):
     if not path.exists():
         return AmbientSettings()
     with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
+        columns = {row[1] for row in connection.execute('PRAGMA table_info(arby_ambient_settings)')}
+        enabled = connection.execute('SELECT phrases_enabled FROM arby_ambient_settings WHERE id=1').fetchone() if 'phrases_enabled' in columns else None
         row = connection.execute(
             """SELECT mode, gesture_min_seconds, gesture_max_seconds,
                       invitation_min_seconds, invitation_max_seconds
@@ -58,7 +63,7 @@ def load_ambient_settings(database=DEFAULT_DATABASE):
         ).fetchone()
     if row is None:
         raise ValueError("La base de datos no tiene configuración de Arby.")
-    return AmbientSettings(*row)
+    return AmbientSettings(*row, phrases_enabled=bool(enabled[0]) if enabled else True)
 
 
 def save_ambient_settings(settings: AmbientSettings, database=DEFAULT_DATABASE):
@@ -76,18 +81,22 @@ def save_ambient_settings(settings: AmbientSettings, database=DEFAULT_DATABASE):
                 invitation_max_seconds REAL NOT NULL CHECK (invitation_max_seconds >= invitation_min_seconds)
             )"""
         )
+        columns = {row[1] for row in connection.execute('PRAGMA table_info(arby_ambient_settings)')}
+        if 'phrases_enabled' not in columns:
+            connection.execute('ALTER TABLE arby_ambient_settings ADD COLUMN phrases_enabled INTEGER NOT NULL DEFAULT 1 CHECK(phrases_enabled IN (0,1))')
         connection.execute(
             """INSERT INTO arby_ambient_settings
                (id, mode, gesture_min_seconds, gesture_max_seconds,
-                invitation_min_seconds, invitation_max_seconds)
-               VALUES (1, ?, ?, ?, ?, ?)
+                invitation_min_seconds, invitation_max_seconds, phrases_enabled)
+               VALUES (1, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
                    mode = excluded.mode,
                    gesture_min_seconds = excluded.gesture_min_seconds,
                    gesture_max_seconds = excluded.gesture_max_seconds,
                    invitation_min_seconds = excluded.invitation_min_seconds,
-                   invitation_max_seconds = excluded.invitation_max_seconds""",
-            (settings.mode, *settings.gesture_range, *settings.invitation_range),
+                   invitation_max_seconds = excluded.invitation_max_seconds,
+                   phrases_enabled = excluded.phrases_enabled""",
+            (settings.mode, *settings.gesture_range, *settings.invitation_range, settings.phrases_enabled),
         )
 
 
@@ -140,6 +149,8 @@ class AmbientAudio:
             env["SDL_AUDIODRIVER"] = self.audio_driver
         if self.audio_device:
             env["AUDIODEV"] = self.audio_device
+            if self.audio_driver == "pulseaudio":
+                env["PULSE_SINK"] = self.audio_device
         command = [self.ffplay, "-hide_banner", "-loglevel", "error", "-nodisp", "-autoexit",
                    "-af", "aformat=sample_rates=48000:channel_layouts=stereo", str(clip)]
         deadline = time.monotonic() + 10
@@ -166,12 +177,10 @@ class AmbientAudio:
 class AmbientSequence:
     """Schedule phrases after inactivity and gestures in event mode."""
 
-    PHRASE_INTERVAL = 300.0
-
     def __init__(self, settings: AmbientSettings, *, speak=True, rng=None):
         self.settings = settings
         self._rng = rng if rng is not None else Random()
-        self._phrases = (*EVENT_PHRASES, *(action.text for action in INVITATIONS)) if speak else ()
+        self._phrases = (*EVENT_PHRASES, *(action.text for action in INVITATIONS)) if speak and settings.phrases_enabled else ()
         self._gesture_at = None
         self._phrase_at = None
         self._future = None
@@ -199,7 +208,7 @@ class AmbientSequence:
             self._future = None
 
         if self._phrases and self._phrase_at is None:
-            self._phrase_at = now + self.PHRASE_INTERVAL
+            self._phrase_at = now + self._rng.uniform(*self.settings.invitation_range)
         if self.settings.mode == "evento" and self._gesture_at is None:
             self._gesture_at = now + self._rng.uniform(*self.settings.gesture_range)
         if now < self._retry_at:
@@ -238,7 +247,7 @@ def main():
         if args.mode != "ver":
             settings = AmbientSettings(
                 args.mode, *(args.gestos or settings.gesture_range),
-                *(args.invitaciones or settings.invitation_range),
+                *(args.invitaciones or settings.invitation_range), settings.phrases_enabled,
             )
             save_ambient_settings(settings, args.db)
     except (ValueError, OSError, sqlite3.Error) as exc:

@@ -311,6 +311,33 @@ class SupportTests(unittest.TestCase):
                 system_action('wifi', ssid='fair', password='password')
         self.assertNotIn('password', str(caught.exception))
 
+    def test_old_ambient_database_migrates_without_resetting_settings(self):
+        save_ambient_settings(AmbientSettings('evento', 10, 20, 30, 40), self.database)
+        with closing(connect(self.database)) as db, db:
+            db.execute('ALTER TABLE arby_ambient_settings DROP COLUMN phrases_enabled')
+        self.assertEqual(load_ambient_settings(self.database), AmbientSettings('evento', 10, 20, 30, 40))
+        initialize(self.database)
+        payload = settings(self.database)
+        payload['ambient']['phrases_enabled'] = False
+        save_settings(payload, self.database)
+        initialize(self.database)
+        self.assertEqual(load_ambient_settings(self.database), AmbientSettings('evento', 10, 20, 30, 40, False))
+
+    def test_settings_survive_portal_recreation_and_initialization(self):
+        saved = settings(self.database)
+        saved['ambient'].update(phrases_enabled=False, invitation_min_seconds=50, invitation_max_seconds=70)
+        saved['controls'] = {'mute': False, 'mic_gain_db': 9}
+        save_settings(saved, self.database)
+        initialize(self.database)
+        app = create_app(self.database, self.password_hash, system=self.system)
+        self.assertIsNotNone(app)
+        reloaded = settings(self.database)
+        self.assertEqual(reloaded, saved)
+        # Older portal clients preserve the saved disable switch.
+        del saved['ambient']['phrases_enabled']
+        save_settings(saved, self.database)
+        self.assertFalse(load_ambient_settings(self.database).phrases_enabled)
+
     def test_bluetooth_error_reaches_portal_without_raw_output(self):
         with patch('libraries.support.server.subprocess.run', return_value=SimpleNamespace(
                 returncode=0, stdout='{"error_code":"bluetooth_auth_failed"}', stderr='private device details')):

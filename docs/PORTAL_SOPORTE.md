@@ -239,6 +239,42 @@ Si falta NetworkManager o hay problemas de permisos, el panel sigue disponible
 y muestra el fallo de la acción. No cambies la red de la Raspberry automáticamente
 al instalar este portal.
 
+## Ajustes guardados y frases periódicas
+
+**Guardar ajustes** escribe en `config/arby_settings.sqlite3`, dentro del proyecto.
+Los ajustes de audio, comportamiento, voz e iluminación sobreviven al cierre del
+navegador, al reinicio de los servicios y al apagado de la Raspberry. **Aplicar y
+reiniciar Arby** carga esos ajustes en la ejecución actual. No elimines esta base
+de datos al actualizar el proyecto; portal y Arby deben usar el mismo checkout.
+
+En **Experiencia → Comportamiento**, **Activar frases periódicas** permite
+habilitar o deshabilitar las frases en ambos modos. Los campos mínimo y máximo
+controlan el tiempo de espera aleatorio, en segundos, desde que Arby queda libre
+o termina la frase anterior. Los gestos periódicos siguen siendo exclusivos del
+modo evento. Guarda y aplica los cambios. Las instalaciones anteriores conservan
+sus intervalos y comienzan con las frases habilitadas, como antes.
+
+## Salida de audio Bluetooth
+
+Conecta el altavoz o los audífonos en **Conexión → Bluetooth** y después abre
+**Audio → Buscar dispositivos**. La lista incluye salidas Bluetooth expuestas por
+BlueALSA (`bluealsa-aplay -L`) y PulseAudio/PipeWire (`pactl --format=json list sinks`).
+Selecciona la salida, guarda y aplica. La preferencia conserva la dirección del
+dispositivo; no se guarda un índice de tarjeta ALSA. La recuperación del jack se
+desactiva cuando se selecciona una salida Bluetooth.
+
+BlueZ por sí solo no proporciona un dispositivo de reproducción. Debe estar
+configurado BlueALSA o PulseAudio/PipeWire con soporte Bluetooth. Ambos servicios
+(portal y Arby) necesitan acceso al mismo servidor de audio. Un servidor de la
+sesión de escritorio puede no ser accesible desde `arby-portal` o desde el servicio
+Arby; en ese caso revisa sus permisos y entorno, o usa BlueALSA accesible desde el
+servicio. No se cambia automáticamente el audio del escritorio.
+
+La preferencia persiste aunque el altavoz esté apagado. La conexión inalámbrica
+puede requerir reconectar el dispositivo después del arranque. Si el dispositivo
+no está disponible, Arby lo informa y no cambia a otro altavoz. Esta integración
+agrega salidas Bluetooth; la captura sigue usando entradas físicas ALSA.
+
 ## Bluetooth desde el portal
 
 El panel **Bluetooth**, dentro de **Conexión**, consulta el adaptador de la Raspberry, busca dispositivos

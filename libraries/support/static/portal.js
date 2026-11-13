@@ -163,6 +163,7 @@ function fill(data) {
   const controls = {...data.defaults, ...data.runtime.effective?.controls, ...data.saved.controls};
   const ambient = data.saved.ambient;
   $('mode').value = ambient.mode;
+  $('phrases-enabled').checked = ambient.phrases_enabled !== false;
   $('gesture-min').value = ambient.gesture_min_seconds;
   $('gesture-max').value = ambient.gesture_max_seconds;
   $('invitation-min').value = ambient.invitation_min_seconds;
@@ -439,7 +440,7 @@ $('settings-form').addEventListener('submit', event => {
     const value = id => Number($(id).value);
     const rate = value('rate');
     const payload = {
-      ambient: {mode: $('mode').value, gesture_min_seconds: value('gesture-min'), gesture_max_seconds: value('gesture-max'),
+      ambient: {mode: $('mode').value, phrases_enabled: $('phrases-enabled').checked, gesture_min_seconds: value('gesture-min'), gesture_max_seconds: value('gesture-max'),
         invitation_min_seconds: value('invitation-min'), invitation_max_seconds: value('invitation-max')},
       controls: {mute: !$('voice-on').checked, rate: `${rate >= 0 ? '+' : ''}${rate}%`, mic_gain_db: value('gain'),
         mic_channel: $('mic-channel').value, matrix_brightness: value('matrix-brightness'), strip_brightness: value('strip-brightness')},
@@ -447,7 +448,7 @@ $('settings-form').addEventListener('submit', event => {
     };
     await api('/api/settings', 'PUT', payload);
     dirty = false;
-    notice('Ajustes guardados. Aplica los cambios cuando Arby esté libre.');
+    notice('Ajustes guardados en la Raspberry; se conservan al apagarla. Aplica los cambios cuando Arby esté libre.');
     await refresh();
     if (currentView() === 'audio') await loadAudio();
   });

@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 
 from libraries.audio.arby_devices import (
     apply_selection, discover_devices, find_preferred, inventory,
-    load_selection, portaudio_input, validate_selection,
+    load_selection, portaudio_input, validate_selection, discover_bluetooth_outputs, bluetooth_output,
 )
 from libraries.core.arby_support import initialize, save_settings, settings
 
@@ -26,6 +26,38 @@ def device(role='input', card=1, **updates):
 
 
 class AudioIdentityTests(unittest.TestCase):
+    def test_bluetooth_outputs_are_discovered_with_stable_identity(self):
+        import json
+        outputs = {
+            'pactl': json.dumps([{'name': 'bluez_output.AA_BB_CC_DD_EE_FF.1', 'description': 'Altavoz'}]),
+            'bluealsa-aplay': 'bluealsa:DEV=11:22:33:44:55:66,PROFILE=a2dp,SRV=org.bluealsa\n    Audífonos, trusted audio-headset, playback\n    A2DP (SBC)\nbluealsa:DEV=11:22:33:44:55:66,PROFILE=sco,SRV=org.bluealsa\n    Audífonos, trusted audio-headset, capture\n',
+        }
+        with patch('libraries.audio.arby_devices.command_output', side_effect=lambda argv: outputs[argv[0]]):
+            devices = discover_bluetooth_outputs()
+        self.assertEqual(len(devices), 2)
+        self.assertEqual({d['role'] for d in devices}, {'output'})
+        self.assertEqual(devices[0]['identity']['serial'], 'AA:BB:CC:DD:EE:FF')
+        validate_selection({'input': None, 'output': devices[1]['identity']})
+
+    def test_bluetooth_selection_uses_endpoint_after_rename(self):
+        for driver, endpoint, audio_driver in [
+                ('bluealsa', 'bluealsa:DEV=AA:BB:CC:DD:EE:FF,PROFILE=a2dp,SRV=org.bluealsa', 'alsa'),
+                ('pulse-bluetooth', 'bluez_output.AA_BB_CC_DD_EE_FF.1', 'pulseaudio')]:
+            with self.subTest(driver=driver):
+                original = bluetooth_output(driver, 'Nombre anterior', 'AA:BB:CC:DD:EE:FF', endpoint)
+                current = bluetooth_output(driver, 'Nombre nuevo', 'AA:BB:CC:DD:EE:FF', endpoint)
+                config = SimpleNamespace(input_mode='text', mute=False, audio_recover_on_exit=True)
+                apply_selection(config, {'input': None, 'output': original['identity']}, devices=[current])
+                self.assertEqual(config.audio_device, endpoint)
+                self.assertEqual(config.audio_driver, audio_driver)
+                self.assertFalse(config.audio_recover_on_exit)
+                with self.assertRaises(ValueError):
+                    apply_selection(config, {'input': None, 'output': original['identity']}, devices=[])
+
+    def test_missing_bluetooth_audio_services_leave_inventory_usable(self):
+        with patch('libraries.audio.arby_devices.command_output', return_value=''):
+            self.assertEqual(discover_bluetooth_outputs(), [])
+
     def test_reordered_card_resolves_current_portaudio_input(self):
         preferred = identity()
         current = device(card=4)
@@ -102,6 +134,15 @@ class AudioIdentityTests(unittest.TestCase):
             payload['audio']['input'] = identity()
             save_settings(payload, database)
             self.assertEqual(load_selection(database)['input'], identity())
+            # Simulate closing the portal and loading settings on the next boot.
+            initialize(database)
+            self.assertEqual(load_selection(database)['input'], identity())
+            bluetooth = bluetooth_output('bluealsa', 'Altavoz', 'AA:BB:CC:DD:EE:FF',
+                                         'bluealsa:DEV=AA:BB:CC:DD:EE:FF,PROFILE=a2dp,SRV=org.bluealsa')
+            payload['audio']['output'] = bluetooth['identity']
+            save_settings(payload, database)
+            initialize(database)
+            self.assertEqual(load_selection(database)['output'], bluetooth['identity'])
             # Old clients may omit audio; the saved device must not be cleared.
             del payload['audio']
             save_settings(payload, database)

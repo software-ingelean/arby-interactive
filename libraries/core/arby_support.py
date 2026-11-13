@@ -64,6 +64,9 @@ def initialize(database=DEFAULT_DATABASE):
     else:
         load_ambient_settings(database)
     with closing(connect(database)) as db, db:
+        columns = {row[1] for row in db.execute('PRAGMA table_info(arby_ambient_settings)')}
+        if 'phrases_enabled' not in columns:
+            db.execute('ALTER TABLE arby_ambient_settings ADD COLUMN phrases_enabled INTEGER NOT NULL DEFAULT 1 CHECK(phrases_enabled IN (0,1))')
         db.executescript('''
             CREATE TABLE IF NOT EXISTS support_settings (
                 id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
@@ -111,9 +114,11 @@ def save_settings(payload, database=DEFAULT_DATABASE):
     if not isinstance(payload, dict) or set(payload) not in ({'ambient', 'controls'}, {'ambient', 'controls', 'audio'}):
         raise ValueError('Se requieren ambiente y controles.')
     raw = payload['ambient']
+    if isinstance(raw, dict):
+        raw = {'phrases_enabled': load_ambient_settings(database).phrases_enabled, **raw}
     if not isinstance(raw, dict) or set(raw) != set(asdict(AmbientSettings())):
         raise ValueError('Configuración de ambiente incompleta.')
-    if any(type(value) not in (int, float) for key, value in raw.items() if key != 'mode'):
+    if any(type(value) not in (int, float) for key, value in raw.items() if key not in ('mode', 'phrases_enabled')):
         raise ValueError('Los intervalos deben ser números.')
     ambient = AmbientSettings(**raw)
     controls = validate_controls(payload['controls'])
@@ -121,8 +126,8 @@ def save_settings(payload, database=DEFAULT_DATABASE):
     # One transaction for both the existing ambient singleton and new overrides.
     with closing(connect(database)) as db, db:
         db.execute('''UPDATE arby_ambient_settings SET mode=?, gesture_min_seconds=?,
-            gesture_max_seconds=?, invitation_min_seconds=?, invitation_max_seconds=? WHERE id=1''',
-            (ambient.mode, *ambient.gesture_range, *ambient.invitation_range))
+            gesture_max_seconds=?, invitation_min_seconds=?, invitation_max_seconds=?, phrases_enabled=? WHERE id=1''',
+            (ambient.mode, *ambient.gesture_range, *ambient.invitation_range, ambient.phrases_enabled))
         db.execute('INSERT OR REPLACE INTO support_settings VALUES(1, ?)', (json.dumps(controls),))
         if audio is not None:
             db.execute('INSERT OR REPLACE INTO support_audio_settings VALUES(1, ?)', (json.dumps(audio),))

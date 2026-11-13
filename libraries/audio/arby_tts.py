@@ -371,6 +371,8 @@ class ArbyTTS:
             env["SDL_AUDIODRIVER"] = self.config.audio_driver
         if self.config.audio_device:
             env["AUDIODEV"] = self.config.audio_device
+            if self.config.audio_driver == "pulseaudio":
+                env["PULSE_SINK"] = self.config.audio_device
         options = ({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt"
                    else {"start_new_session": True})
         # The directory is private and removed after playback, including errors

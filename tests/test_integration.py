@@ -3,7 +3,7 @@ from concurrent.futures import CancelledError, Future
 import sys
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from libraries.audio.arby_recordings import EVENT_PHRASES, BOT_ERROR, BOT_TRY_LATER, REPEAT_QUESTION
 from libraries.core.arby_ambient import AmbientSequence, AmbientSettings, INVITATIONS
@@ -15,8 +15,27 @@ from libraries.simulation.arby_memory_pixels import MemoryPixels
 
 
 class AmbientPhraseTests(unittest.TestCase):
+    def test_disabled_periodic_phrases_never_submit_in_office_mode(self):
+        scheduler = AmbientSequence(AmbientSettings(phrases_enabled=False))
+        submit = Mock()
+        for now in (0, 300, 900, 86400):
+            scheduler.tick(now, visitor_active=False, submit=submit)
+        submit.assert_not_called()
+
+    def test_periodic_phrase_interval_uses_saved_range(self):
+        rng = Mock()
+        rng.uniform.return_value = 25
+        scheduler = AmbientSequence(AmbientSettings(invitation_min_seconds=20, invitation_max_seconds=30), rng=rng)
+        submit = Mock(return_value=Future())
+        scheduler.tick(0, visitor_active=False, submit=submit)
+        scheduler.tick(24, visitor_active=False, submit=submit)
+        submit.assert_not_called()
+        scheduler.tick(25, visitor_active=False, submit=submit)
+        submit.assert_called_once()
+        rng.uniform.assert_called_once_with(20, 30)
+
     def test_activity_restarts_countdown_and_playback_completion_starts_next_interval(self):
-        scheduler = AmbientSequence(AmbientSettings())
+        scheduler = AmbientSequence(AmbientSettings(invitation_min_seconds=300, invitation_max_seconds=300))
         submitted = []
 
         def submit(action):
@@ -46,7 +65,7 @@ class AmbientPhraseTests(unittest.TestCase):
 
     def test_rotation_plays_event_phrases_and_invitations_in_order(self):
         settings = AmbientSettings(mode="evento", gesture_min_seconds=20000,
-                                   gesture_max_seconds=20000)
+                                   gesture_max_seconds=20000, invitation_min_seconds=300, invitation_max_seconds=300)
         scheduler = AmbientSequence(settings)
         expected = [*EVENT_PHRASES, *(action.text for action in INVITATIONS)]
         spoken = []
@@ -439,7 +458,6 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("Arby: Test", messages)
 
     def test_trill_and_console_run_together(self):
-        from unittest.mock import Mock
         sensor = Mock()
         reactions = Mock()
         with patch.dict("os.environ", {"ARBY_TRILL": "true", "ARBY_DEMO": "true",
@@ -454,7 +472,6 @@ class RunnerTests(unittest.TestCase):
         sensor.close.assert_called_once()
 
     def test_trill_does_not_replace_gemini_with_demo(self):
-        from unittest.mock import Mock
         with patch.dict("os.environ", {"ARBY_TRILL": "true", "ARBY_EYES": "none"}), \
                 patch("libraries.core.arby_touch.TrillReader", return_value=Mock()), \
                 patch("builtins.print") as printer:
