@@ -23,28 +23,43 @@ DEFAULTS = {'i2c_bus': 1,
            'saludo': [12, 13],
            'ayuda': [14, 15]}}
 
-PHRASES = {'cabeza': ['Ay, qué rico que acaricies mis hojitas.',
-            'Con esas caricias me dan ganas de florecer.',
-            'Suavecito, mis hojitas son delicadas.'],
- 'barriga': ['Ji, ji, me haces cosquillitas.',
-             'Un poquito de agua y cariño me hacen feliz.',
-             'Con tanto cariño, voy a echar raíces aquí.'],
- 'mano': ['Hola, te regalo un saludito de mi ramita.',
-          'Qué lindo tenerte cerquita.',
-          'Estoy encantada de conocerte.'],
- 'saludo': ['Hola, soy Arby, tu plantita de compañía.',
-            'Qué alegría verte. ¿Me acompañas un ratito?',
-            'Acércate, puedes acariciar mis hojitas con suavidad.'],
- 'ayuda': ['Si necesitas ayuda con tu visita, en recepción te orientan con '
-           'mucho gusto.',
-           '¿Vienes a una cita? Puedes avisar en recepción que ya llegaste.',
-           'Mientras esperas, me quedo aquí contigo.'],
- 'repetido': ['Despacito, que soy una plantita delicada.',
-              'Me encantan las caricias suaves.',
-              'Aquí estoy. Vamos con calma.'],
- 'sostenido': ['Qué bonito sentirte cerquita.',
-               'Gracias por el cariño. ¿Me dejas descansar un poquito?',
-               'Mis hojitas necesitan un descansito.']}
+PHRASES = {
+    "cabeza": [
+        "¡Uy! Casi me despeinas las hojas.",
+        "¡Quiubo! Soy Arby, la planta de INGELEAN.",
+        "Suavecito, que hoy sí me peiné.",
+    ],
+    "barriga": [
+        "¡Uy! No sabía que las plantas tenían cosquillas.",
+        "Con ese toque me hiciste parpadear.",
+        "¡Ave María! Casi se me cae una hoja del susto.",
+    ],
+    "mano": [
+        "¡Chóquela! Bueno, yo pongo la rama.",
+        "¡Todo bien, todo bien! ¿Cómo vas?",
+        "¡Buenas! Así sí da gusto saludar.",
+    ],
+    "saludo": [
+        "¡Hola! Soy Arby. ¿Qué me cuentas?",
+        "¡Quiubo! ¿Sabías que hay árboles que dan fruta en el tronco?",
+        "Si te gusta el café, pregúntame por el Coffee Party Fest.",
+    ],
+    "ayuda": [
+        "¿Quieres saber qué hacemos en INGELEAN? Pregúntame.",
+        "Si buscas ideas para sembrar un frutal, te puedo contar de Arbilito Frutal.",
+        "Si necesitas orientación con tu visita, el equipo te puede ayudar.",
+    ],
+    "repetido": [
+        "¡Ya te sentí! Dame un segundito.",
+        "Suave, que no soy botón de ascensor.",
+        "Un toque a la vez, que hasta las plantas nos enredamos.",
+    ],
+    "sostenido": [
+        "Listo, ya puedes soltarme.",
+        "Pausa técnica. Hasta las plantas descansan.",
+        "¿Me das un momentico para acomodar las hojas?",
+    ],
+}
 
 class TouchDetector:
     def __init__(self, cfg):
