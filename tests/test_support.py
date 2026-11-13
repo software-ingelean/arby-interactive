@@ -112,7 +112,7 @@ class SupportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             enqueue('speaker', self.database)
 
-    def test_tests_are_admitted_by_existing_runtime_and_busy_is_rejected(self):
+    def test_tests_wait_for_existing_runtime_when_busy(self):
         with patch.dict(os.environ, {'ARBY_SUPPORT': 'true'}):
             bridge = SupportBridge(self.database)
         bridge.snapshot.update(state='ready', components={'speaker': {'state': 'unknown'}})
@@ -124,10 +124,15 @@ class SupportTests(unittest.TestCase):
         bridge.tick(runtime, None, tts, None, submit)
         with closing(connect(self.database)) as db:
             row = db.execute('SELECT * FROM support_commands WHERE id=?', (identifier,)).fetchone()
-        self.assertEqual(row['state'], 'error')
+        self.assertEqual(row['state'], 'pending')
         submit.assert_called_once()
         self.assertEqual(submit.call_args.args[0].kind, 'phrase')
-        self.assertIn('ocupado', row['message'])
+        self.assertIn('libre', row['message'])
+        future = Future()
+        bridge.next_poll = 0
+        bridge.tick(runtime, None, tts, None, lambda action: future)
+        with closing(connect(self.database)) as db:
+            self.assertEqual(db.execute('SELECT state FROM support_commands WHERE id=?', (identifier,)).fetchone()[0], 'running')
 
     def test_test_completion_and_failure(self):
         with patch.dict(os.environ, {'ARBY_SUPPORT': 'true'}):
@@ -258,6 +263,28 @@ class SupportTests(unittest.TestCase):
         bridge.next_poll = 0
         bridge.tick(runtime, None, SimpleNamespace(last_error=None), None, lambda action: None)
         runtime.cancel_ambient.assert_called_once_with(future)
+
+    def test_cancel_removes_waiting_demo_without_interrupting_conversation(self):
+        with patch.dict(os.environ, {'ARBY_SUPPORT': 'true'}):
+            bridge = SupportBridge(self.database)
+        bridge.snapshot.update(state='ready', components={'eyes': {'state': 'ready'}})
+        bridge.publish()
+        identifier = enqueue('eyes', self.database)
+        runtime = SimpleNamespace(pending_count=1, visual=SimpleNamespace(phase='speaking'),
+                                  cancel_ambient=Mock())
+        submit = Mock(return_value=None)
+        bridge.tick(runtime, None, SimpleNamespace(last_error=None), None, submit)
+        self.assertTrue(bridge.waiting)
+        enqueue('cancel', self.database)
+        bridge.next_poll = 0
+        bridge.tick(runtime, None, SimpleNamespace(last_error=None), None, submit)
+        self.assertFalse(bridge.waiting)
+        runtime.cancel_ambient.assert_not_called()
+        self.assertEqual(submit.call_count, 1)
+        with closing(connect(self.database)) as db:
+            row = db.execute('SELECT * FROM support_commands WHERE id=?', (identifier,)).fetchone()
+        self.assertEqual(row['state'], 'error')
+        self.assertIn('cancelada', row['message'])
 
     def test_system_failure_has_no_subprocess_output_or_password(self):
         with patch('libraries.support.server.subprocess.run', return_value=SimpleNamespace(returncode=1, stdout='secret', stderr='password')):

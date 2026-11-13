@@ -109,13 +109,46 @@ meter::-moz-meter-bar { background: #7caa57; border-radius: 20px; }
 .demo-button strong { font-size: 14px; font-weight: 600; }
 .test-result { padding: 16px 20px; background: #eaf0e1; border: 1px solid #d6e0ca; border-radius: 10px; font-size: 13px; margin: 20px 0; }
 .sensor-feedback { color: var(--green); padding: 15px; background: #f0f4eb; border-radius: 9px; font-size: 13px; line-height: 1.6; }
-.wifi-form { display: grid; grid-template-columns: 1fr 1fr auto; align-items: end; gap: 16px; margin: 20px 0 4px; }
 .energy-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
 .energy-grid .panel { display: flex; flex-direction: column; }
 .energy-grid p { font-size: 13px; flex: 1; }
 .energy-symbol { font-size: 34px; color: #74915e; display: block; margin-bottom: 25px; }
 .poweroff-panel { border-color: #e6d5cb; }
 .poweroff-panel .energy-symbol { color: #a4775f; }
+/* Wi-Fi and Bluetooth */
+#view-network .section-title { align-items: flex-start; flex-wrap: wrap; }
+#view-network .section-title > div { min-width: 0; }
+#view-network .section-title .actions { margin-left: auto; }
+#network-status, #bluetooth-status { overflow-wrap: anywhere; }
+.wifi-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 20px; margin: 24px 0 4px; }
+.wifi-field { min-width: 0; }
+.wifi-field > label:first-child { margin-top: 0; }
+.wifi-field select, .wifi-field input { max-width: 100%; }
+#wifi-hint { margin: 10px 0 0; }
+#wifi-credentials .check { margin: 10px 0 0; font-weight: 400; min-height: 44px; cursor: pointer; }
+#wifi-credentials .check input { flex-shrink: 0; }
+.wifi-form > button { grid-column: 1 / -1; justify-self: end; }
+#bluetooth-devices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.bluetooth-device { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; overflow-wrap: anywhere; }
+.bluetooth-device button { margin-top: auto; max-width: 100%; }
+
+
+.visits-scroll { overflow-x: auto; }
+.visits-table { width: 100%; border-collapse: collapse; text-align: left; }
+.visits-table th, .visits-table td { padding: .75rem; border-bottom: 1px solid #ddd; white-space: nowrap; }
+
+.debug-flow { display:flex; flex-wrap:wrap; gap:12px; margin:20px 0; }
+.debug-step { padding:12px; border:1px solid #b8c7bd; border-radius:10px; }
+.debug-step:not(:last-child)::after { content:' →'; }
+.debug-step.active { background:#d5f5e0; border:2px solid #287a4b; font-weight:700; color:#153d26; }
+.debug-stage { padding:16px; border:1px solid #b8c7bd; border-radius:12px; min-width:0; }
+.debug-stage code, #debug-threads pre, .debug-events pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+.debug-events { max-height:550px; overflow:auto; margin-top:16px; font-size:12px; }
+.debug-events pre { padding:10px; margin:0; border-bottom:1px solid #d8e1db; }
+.debug-error { color:#a12d22; }
+#view-debug > .panel { margin-bottom:20px; }
+
+
 /* Sessions, feedback and mobile */
 .login { width: calc(100% - 32px); max-width: 430px; margin: clamp(24px, 6vh, 64px) auto; padding: 32px; background: white; border: 1px solid var(--line); border-radius: 22px; }
 .login .brand { flex-direction: column; justify-content: center; gap: 8px; padding-bottom: 24px; margin-bottom: 24px; border-bottom: 1px solid var(--line); }
@@ -141,8 +174,6 @@ footer { display: flex; justify-content: space-between; gap: 15px; color: #8a958
   .cards, .demo-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .energy-grid { grid-template-columns: 1fr; }
   .savebar { align-items: flex-start; flex-direction: column; }
-  .wifi-form { grid-template-columns: 1fr 1fr; }
-  .wifi-form button { grid-column: 1/-1; }
 }
 @media (max-width: 760px) {
   .app-shell { display: block; }
@@ -176,6 +207,13 @@ footer { display: flex; justify-content: space-between; gap: 15px; color: #8a958
   .section-title > button { width: 100%; }
   .wifi-form { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .wifi-form > div, .pair > label { min-width: 0; }
+  .wifi-form > button { width: 100%; justify-self: stretch; }
+  #view-network .section-title .actions { width: 100%; margin-left: 0; }
+  #view-network .actions button { flex: 1 1 160px; min-height: 44px; }
+  #view-network button { min-height: 44px; }
+  #bluetooth-devices { grid-template-columns: minmax(0, 1fr); }
+  .bluetooth-device button { width: 100%; }
+  #view-network .callout { padding: 16px; }
   input, select { font-size: 16px; }
   .live-audio { gap: 16px; }
   .live-audio meter { min-width: 0; flex-basis: 100%; }
@@ -191,24 +229,8 @@ footer { display: flex; justify-content: space-between; gap: 15px; color: #8a958
   .demo-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
   .demo-button { padding: 16px; }
   .card { min-height: 130px; }
-  .wifi-form { grid-template-columns: 1fr; }
   .actions { width: 100%; }
   .actions button { flex: 1; }
   .login { margin: 24px auto; padding: 28px 24px; }
 }
 @media (prefers-reduced-motion: no-preference) { button, a { transition: background-color .15s, border-color .15s; } }
-
-.visits-scroll { overflow-x: auto; }
-.visits-table { width: 100%; border-collapse: collapse; text-align: left; }
-.visits-table th, .visits-table td { padding: .75rem; border-bottom: 1px solid #ddd; white-space: nowrap; }
-
-.debug-flow { display:flex; flex-wrap:wrap; gap:12px; margin:20px 0; }
-.debug-step { padding:12px; border:1px solid #b8c7bd; border-radius:10px; }
-.debug-step:not(:last-child)::after { content:' →'; }
-.debug-step.active { background:#d5f5e0; border:2px solid #287a4b; font-weight:700; color:#153d26; }
-.debug-stage { padding:16px; border:1px solid #b8c7bd; border-radius:12px; min-width:0; }
-.debug-stage code, #debug-threads pre, .debug-events pre { white-space:pre-wrap; overflow-wrap:anywhere; }
-.debug-events { max-height:550px; overflow:auto; margin-top:16px; font-size:12px; }
-.debug-events pre { padding:10px; margin:0; border-bottom:1px solid #d8e1db; }
-.debug-error { color:#a12d22; }
-#view-debug > .panel { margin-bottom:20px; }

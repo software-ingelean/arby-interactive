@@ -333,12 +333,12 @@ def main():
                 if preview and preview.requested_stop():
                     stop.set()
                     break
-                if touch is not None or not input_done.is_set():
+                support.tick(runtime, microphone, tts, touch, submit_ambient)
+                if (touch is not None or not input_done.is_set()) and not support.waiting and support.pending is None:
                     busy, current_revision = runtime.visitor_activity
                     visitor_active = touch_active or busy or current_revision != activity_revision
                     activity_revision = current_revision
                     ambient.tick(started, visitor_active=visitor_active, submit=submit_ambient)
-                support.tick(runtime, microphone, tts, touch, submit_ambient)
                 visual = runtime.visual
                 if visual.revision != revision:
                     eyes.set_state(visual.matrix_state, color=visual.color, now=started)

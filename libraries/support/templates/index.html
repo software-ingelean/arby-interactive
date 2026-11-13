@@ -112,6 +112,7 @@
       <section data-view="tests" id="view-tests" hidden>
         <div class="callout"><strong>Pequeñas pruebas, sin cambiar la configuración</strong><p>Las demostraciones esperan que Arby esté libre. Si alguien empieza a interactuar, se interrumpen para atenderle. Confirma siempre el resultado escuchando o mirando el equipo.</p></div>
         <div class="section-title"><h2>Voz, expresiones y luces</h2><button id="cancel-test" class="secondary">Detener demostración</button></div>
+        <p id="tests-availability" class="sensor-feedback" role="status" aria-live="polite">Comprobando disponibilidad de Arby…</p>
         <div id="demo-buttons" class="demo-grid"></div>
         <div id="test-result" class="test-result" role="status">Elige una prueba para empezar.</div>
         <div class="two-columns">
@@ -121,7 +122,26 @@
       </section>
 
       <section data-view="network" id="view-network" hidden>
-        <article class="panel"><div class="section-title"><div><p class="eyebrow">CONEXIÓN DE LA FERIA</p><h2>Internet para conversar</h2></div><button id="refresh-network" class="secondary">↻ Actualizar redes</button></div><p id="network-status">Consulta las redes para comprobar la conexión.</p><form id="wifi-form" class="wifi-form"><div><label for="ssid">Red Wi-Fi de internet · wlan0</label><input id="ssid" list="networks" required maxlength="32" autocomplete="off"><datalist id="networks"></datalist></div><div><label for="wifi-password">Contraseña de la red</label><input id="wifi-password" type="password" autocomplete="off" maxlength="128"></div><button type="submit">Conectar</button></form></article>
+        <article class="panel">
+          <div class="section-title">
+            <div><p class="eyebrow">CONEXIÓN DE LA FERIA</p><h2>Internet para conversar</h2></div>
+            <button id="refresh-network" class="secondary" type="button">↻ Buscar redes</button>
+          </div>
+          <p id="network-status" role="status" aria-live="polite">Consulta las redes para comprobar la conexión.</p>
+          <form id="wifi-form" class="wifi-form">
+            <div class="wifi-field">
+              <label for="ssid">Red Wi-Fi de internet · wlan0</label>
+              <select id="ssid" required aria-describedby="wifi-hint"><option value="">Selecciona una red disponible</option></select>
+              <p id="wifi-hint" class="hint">Elige una red de la lista. Pulsa Buscar redes para volver a explorar.</p>
+            </div>
+            <div id="wifi-credentials" class="wifi-field" hidden>
+              <label for="wifi-password">Contraseña de la red</label>
+              <input id="wifi-password" type="password" autocomplete="off" maxlength="128">
+              <label class="check"><input id="show-wifi-password" type="checkbox">Mostrar contraseña</label>
+            </div>
+            <button id="connect-wifi" type="submit" disabled>Conectar a la red</button>
+          </form>
+        </article>
         <div class="callout"><strong>Dos conexiones, dos funciones</strong><p>La Wi-Fi interna, wlan0, se usa para internet. La red Arby-Soporte del adaptador USB, wlan1, permite entrar al panel cuando está configurada y activa.</p><p class="hint">El formulario Wi-Fi cambia únicamente la conexión de internet. Si estás entrando por esa misma red, puedes perder temporalmente el acceso.</p></div>
         <article class="panel">
           <div class="section-title"><h2>Dispositivos Bluetooth</h2><div class="actions"><button id="refresh-bluetooth" class="secondary" type="button">Actualizar estado</button><button id="scan-bluetooth" type="button">Buscar dispositivos</button></div></div>

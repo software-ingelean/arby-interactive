@@ -171,6 +171,7 @@ class SupportBridge:
         self.database = database
         self.next_poll = 0
         self.pending = None
+        self.waiting = False
         self.snapshot = {'state': 'starting', 'components': {}, 'effective': {}}
         self.enabled = os.getenv('ARBY_SUPPORT', '').lower() in ('1', 'true', 'yes', 'on')
         if self.enabled:
@@ -223,26 +224,29 @@ class SupportBridge:
                         self.pending = None
                 db.execute("UPDATE support_commands SET state='error',message='La solicitud caducó o Arby se reinició.' WHERE state IN ('pending','running') AND created<?",
                            (time.time() - 30,))
-                row = db.execute("SELECT * FROM support_commands WHERE state='pending' ORDER BY created LIMIT 1").fetchone()
                 row = db.execute("SELECT * FROM support_commands WHERE state='pending' ORDER BY CASE WHEN kind='cancel' THEN 0 ELSE 1 END, created LIMIT 1").fetchone()
+                self.waiting = row is not None
                 if row and row['kind'] == 'cancel':
+                    cancelled = db.execute("UPDATE support_commands SET state='error',message='Prueba cancelada antes de iniciar.' WHERE state='pending' AND kind!='cancel'").rowcount
+                    self.waiting = False
                     stopped = self.pending is not None and runtime.cancel_ambient(self.pending[1])
                     db.execute('UPDATE support_commands SET state=?,message=? WHERE id=?',
-                               ('done', 'Demostración interrumpida.' if stopped else 'No hay una demostración en curso.', row['id']))
+                               ('done', 'Demostración interrumpida.' if stopped else 'Prueba pendiente cancelada.' if cancelled else 'No hay una demostración en curso.', row['id']))
                 elif row and self.pending is None:
                     definition = TESTS[row['kind']]
                     enabled = all(self.snapshot['components'].get(component, {}).get('state') != 'disabled'
                                   for component in definition['requires'])
                     future = submit(definition['action']) if enabled else None
-                    message = 'Prueba en curso.' if future else 'No disponible: componente desactivado o Arby ocupado. Intenta de nuevo.'
+                    message = 'Prueba en curso.' if future else ('Esperando a que Arby esté libre.' if enabled else 'No disponible: componente desactivado.')
                     db.execute('UPDATE support_commands SET state=?,message=? WHERE id=?',
-                               ('running' if future else 'error', message, row['id']))
+                               ('running' if future else 'pending' if enabled else 'error', message, row['id']))
                     if future:
                         self.pending = row['id'], future, row['kind']
             if getattr(runtime, 'visit_recorder', None):
                 self.snapshot['visits'] = runtime.visit_recorder.status
             self.snapshot['pending'] = runtime.pending_count
             self.snapshot['busy'] = runtime.pending_count > 0
+            self.snapshot['visitor_busy'] = runtime.visitor_activity[0] if hasattr(runtime, 'visitor_activity') else runtime.pending_count > 0
             self.snapshot['phase'] = runtime.visual.phase
             if microphone:
                 self.snapshot['microphone_activity'] = microphone.pipeline.visitor_active

@@ -126,7 +126,7 @@ function navigate() {
   if (!$('portal').hidden) {
     if (view === 'visits') loadVisits().catch(error => { $('visits-summary').textContent = error.message; });
     if (view === 'audio' && (!audioInventory || Date.now() - audioChecked > 3000)) loadAudio().catch(error => notice(error.message, true));
-    if (view === 'network') $('refresh-bluetooth').click();
+    if (view === 'network') loadBluetooth(true).catch(error => notice(error.message, true));
     if (view === 'network' && !networkLoaded) $('refresh-network').click();
   }
 }
@@ -248,11 +248,25 @@ function renderDemos(tests) {
 function updateTestButtons() {
   const runtime = latest?.runtime;
   const ready = runtime?.fresh && runtime.state === 'ready' && !powerMessage;
+  const running = latest?.commands.some(command => ['pending', 'running'].includes(command.state) && command.kind !== 'cancel');
+  const visitorBusy = runtime?.visitor_busy ?? runtime?.busy;
+  const blocked = powerMessage ? 'Las pruebas no están disponibles durante el reinicio o apagado.' :
+    !runtime?.fresh ? 'Sin comunicación reciente con Arby. Comprueba que esté iniciado y que ARBY_SUPPORT esté activado.' :
+    runtime.state !== 'ready' ? `Arby no está listo (${runtime.state}). Revisa el estado en Resumen o Depuración.` :
+    running ? 'Hay una demostración solicitada. Puedes detenerla o esperar a que termine.' :
+    visitorBusy ? 'Arby está atendiendo una conversación. Espera a que termine para probar.' : '';
+  $('tests-availability').textContent = blocked || 'Elige una demostración. Si hay una animación automática, la prueba esperará su turno.';
   for (const definition of demoCatalog) {
     const button = document.querySelector(`[data-test="${definition.id}"]`);
-    if (button) button.disabled = !ready || runtime.busy || !definition.requires.every(key => runtime.capabilities?.[key] === true);
+    const unavailable = definition.requires.filter(key => runtime?.capabilities?.[key] !== true);
+    const names = unavailable.map(key => componentNames[key] || key).join(', ');
+    const reason = blocked || (unavailable.length ? `No disponible: ${names}. Revisa los componentes y los ajustes aplicados.` : '');
+    if (button) {
+      button.disabled = !ready || visitorBusy || running || unavailable.length > 0;
+      button.title = reason;
+      button.querySelector('span').textContent = reason || (definition.requires.includes('speaker') ? 'Voz y expresión · escuchar' : definition.requires.includes('strip') ? 'Color de la tira · 3 segundos' : 'Expresión · 3 segundos');
+    }
   }
-  const running = latest?.commands.some(command => ['pending', 'running'].includes(command.state) && command.kind !== 'cancel');
   $('cancel-test').disabled = !ready || !running;
 }
 
@@ -463,27 +477,63 @@ $('cancel-test').addEventListener('click', () => guarded($('cancel-test'), async
   await api('/api/tests/cancel', 'POST', {});
   await refresh();
 }));
+let wifiNetworks = [];
+function updateWifiSelection() {
+  const network = wifiNetworks.find(item => item.ssid === $('ssid').value);
+  const secured = Boolean(network?.security && network.security !== '--');
+  $('wifi-credentials').hidden = !network || !secured;
+  $('wifi-password').disabled = !secured;
+  $('connect-wifi').disabled = !network;
+  $('wifi-hint').textContent = network ? (secured ? 'Introduce la contraseña y pulsa Conectar a la red.' : 'Esta red es abierta. Puedes conectarte sin contraseña.') : 'Elige una red de la lista. Pulsa Buscar redes para volver a explorar.';
+}
+$('ssid').addEventListener('change', () => {
+  $('wifi-password').value = '';
+  updateWifiSelection();
+});
+$('show-wifi-password').addEventListener('change', event => {
+  $('wifi-password').type = event.target.checked ? 'text' : 'password';
+});
 $('refresh-network').addEventListener('click', () => guarded($('refresh-network'), async () => {
-  const result = await api('/api/network');
-  const states = {full: 'Internet disponible', limited: 'Conectividad limitada', portal: 'La red puede requerir iniciar sesión', none: 'Sin conexión a internet', unknown: 'Internet sin comprobar'};
-  const devices = result.devices.filter(device => device[1] !== 'loopback').map(device => `${device[0]}: ${device[3] || device[2]}`).join(' · ');
-  $('network-status').textContent = `${states[result.connectivity] || 'Internet sin comprobar'}. ${devices}. IP: ${result.addresses.join(', ') || 'sin dirección'}`;
-  $('networks').replaceChildren();
-  for (const network of result.networks) {
-    const option = new Option(network.ssid, network.ssid);
-    option.label = `${network.signal}% · ${network.security || 'abierta'}`;
-    $('networks').append(option);
+  $('network-status').textContent = 'Buscando redes Wi-Fi cercanas…';
+  try {
+    const result = await api('/api/network');
+    const states = {full: 'Internet disponible', limited: 'Conectividad limitada', portal: 'La red puede requerir iniciar sesión', none: 'Sin conexión a internet', unknown: 'Internet sin comprobar'};
+    const devices = result.devices.filter(device => device[1] !== 'loopback').map(device => `${device[0]}: ${device[3] || device[2]}`).join(' · ');
+    $('network-status').textContent = `${states[result.connectivity] || states.unknown}. ${devices}. IP: ${result.addresses.join(', ') || 'sin dirección'}`;
+    const selected = $('ssid').value;
+    wifiNetworks = result.networks.sort((a, b) => Number(b.signal) - Number(a.signal));
+    $('ssid').replaceChildren(new Option(wifiNetworks.length ? 'Selecciona una red disponible' : 'No se encontraron redes', ''));
+    for (const network of wifiNetworks) {
+      const signal = Number(network.signal);
+      const strength = signal >= 70 ? 'alta' : signal >= 40 ? 'media' : 'baja';
+      const security = network.security && network.security !== '--' ? network.security : 'Abierta, sin contraseña';
+      $('ssid').add(new Option(`${network.ssid} · Señal ${strength} (${network.signal}%) · ${security}`, network.ssid));
+    }
+    $('ssid').value = wifiNetworks.some(item => item.ssid === selected) ? selected : '';
+    $('ssid').disabled = !wifiNetworks.length;
+    updateWifiSelection();
+    if (!wifiNetworks.length) $('wifi-hint').textContent = 'Acerca Arby al router y pulsa Buscar redes para intentarlo de nuevo.';
+    networkLoaded = true;
+  } catch (error) {
+    $('network-status').textContent = `No se pudieron buscar las redes: ${error.message}`;
+    throw error;
   }
-  networkLoaded = true;
 }));
 $('wifi-form').addEventListener('submit', event => {
   event.preventDefault();
   guarded(event.submitter, async () => {
     if (!await confirmAction('Cambiar de red Wi-Fi', 'Se cambiará la conexión a internet de wlan0. Si estás accediendo por esa red, el panel puede desconectarse o cambiar de IP. La configuración de wlan1 se conserva. ¿Continuar?')) return;
-    const password = $('wifi-password').value;
+    const password = $('wifi-password').disabled ? '' : $('wifi-password').value;
+    $('network-status').textContent = `Conectando a ${$('ssid').value}… Esto puede tardar unos segundos.`;
     $('wifi-password').value = '';
-    const result = await api('/api/network/connect', 'POST', {ssid: $('ssid').value, password});
-    notice(result.message);
+    try {
+      const result = await api('/api/network/connect', 'POST', {ssid: $('ssid').value, password});
+      $('network-status').textContent = result.message;
+      notice(result.message);
+    } catch (error) {
+      $('network-status').textContent = `No se pudo conectar: ${error.message}`;
+      throw error;
+    }
   });
 });
 
@@ -499,9 +549,9 @@ async function loadBluetooth(scan = false) {
     $('bluetooth-status').textContent = result.powered
       ? (result.devices.length ? 'Bluetooth encendido. Elige un dispositivo.' : 'Sin dispositivos. Activa el modo de emparejamiento y busca de nuevo.')
       : 'Bluetooth apagado. Pulsa Buscar dispositivos para encenderlo.';
-    for (const device of result.devices) {
+    for (const device of result.devices.sort((a, b) => Number(b.connected) - Number(a.connected) || Number(b.paired) - Number(a.paired) || a.name.localeCompare(b.name))) {
       const card = document.createElement('article');
-      card.className = 'card';
+      card.className = 'card bluetooth-device';
       const name = document.createElement('strong');
       name.textContent = device.name;
       const state = document.createElement('p');
@@ -509,10 +559,13 @@ async function loadBluetooth(scan = false) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'secondary';
-      button.textContent = device.connected ? 'Desconectar' : 'Conectar';
+      button.textContent = device.connected ? 'Desconectar' : device.paired ? 'Conectar' : 'Emparejar y conectar';
+      button.setAttribute('aria-label', `${button.textContent} ${device.name}`);
       button.addEventListener('click', () => guarded(button, async () => {
         if (bluetoothBusy) return;
         bluetoothBusy = true;
+        button.textContent = device.connected ? 'Desconectando…' : 'Conectando…';
+        $('bluetooth-status').textContent = `${device.connected ? 'Desconectando' : 'Conectando'} ${device.name}…`;
         $('refresh-bluetooth').disabled = $('scan-bluetooth').disabled = true;
         $('bluetooth-devices').querySelectorAll('button').forEach(item => item.disabled = true);
         try {
