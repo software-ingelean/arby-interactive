@@ -371,6 +371,29 @@ class HelperTests(unittest.TestCase):
                 self.helper.execute({'action': 'bluetooth_connect', 'address': address})
             run.assert_not_called()
 
+    def test_bluetooth_recovers_expired_discovery_before_pairing(self):
+        missing = self.helper.BluetoothFailure('Device AA:BB:CC:DD:EE:FF not available')
+        with patch.object(self.helper, 'bluetooth', side_effect=[
+                '', missing, '', 'Paired: no', '', '', 'Connected: yes',
+        ]) as command, patch.object(self.helper, 'run', return_value=SimpleNamespace(stdout='Pairing successful')):
+            result = self.helper.execute({'action': 'bluetooth_connect', 'address': 'AA:BB:CC:DD:EE:FF'})
+        self.assertTrue(result['ok'])
+        self.assertEqual(command.call_args_list[2], unittest.mock.call('scan', 'on', seconds=5))
+
+    def test_bluetooth_missing_device_recovery_is_bounded(self):
+        missing = self.helper.BluetoothFailure('Device not available')
+        with patch.object(self.helper, 'bluetooth', side_effect=['', missing, '', missing]) as command, patch.object(self.helper, 'run') as run:
+            result = self.helper.execute({'action': 'bluetooth_connect', 'address': 'AA:BB:CC:DD:EE:FF'})
+        self.assertEqual(result, {'error_code': 'bluetooth_not_found'})
+        self.assertEqual(command.call_count, 4)
+        run.assert_not_called()
+
+    def test_bluetooth_missing_controller_does_not_trigger_rediscovery(self):
+        with patch.object(self.helper, 'bluetooth', side_effect=['', self.helper.BluetoothFailure('No default controller available')]) as command:
+            result = self.helper.execute({'action': 'bluetooth_connect', 'address': 'AA:BB:CC:DD:EE:FF'})
+        self.assertEqual(result, {'error_code': 'bluetooth_unavailable'})
+        self.assertEqual(command.call_count, 2)
+
     def test_bluetooth_does_not_repair_existing_pairing(self):
         with patch.object(self.helper, 'bluetooth', side_effect=['', 'Paired: yes', '', '', 'Connected: yes']), patch.object(self.helper, 'run') as run:
             result = self.helper.execute({'action': 'bluetooth_connect', 'address': 'AA:BB:CC:DD:EE:FF'})

@@ -150,7 +150,17 @@ def execute_action(data):
                 bluetooth('disconnect', address, seconds=10)
                 return {'ok': True, 'message': 'Dispositivo desconectado.'}
             bluetooth('power', 'on')
-            info = bluetooth_properties(bluetooth('info', address))
+            try:
+                info = bluetooth_properties(bluetooth('info', address))
+            except BluetoothFailure as exc:
+                detail = str(exc).lower()
+                if 'no default controller' in detail or not any(
+                        marker in detail for marker in ('not available', 'doesnotexist')):
+                    raise
+                # An unpaired discovery result can expire while the portal is
+                # open. Rediscover once before trying to pair this exact address.
+                bluetooth('scan', 'on', seconds=5)
+                info = bluetooth_properties(bluetooth('info', address))
             if info.get('Paired') != 'yes':
                 stage = 'pair'
                 try:
