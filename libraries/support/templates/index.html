@@ -30,6 +30,7 @@
       <p class="nav-label">TU ESPACIO DE CONTROL</p>
       <nav aria-label="Secciones del panel">
         <a href="#overview" data-nav="overview"><span aria-hidden="true">◉</span> Resumen</a>
+        <a href="#visits" data-nav="visits"><span aria-hidden="true">◷</span> Visitas</a>
         <a href="#audio" data-nav="audio"><span aria-hidden="true">♫</span> Audio y dispositivos</a>
         <a href="#experience" data-nav="experience"><span aria-hidden="true">✧</span> Experiencia</a>
         <a href="#tests" data-nav="tests"><span aria-hidden="true">▷</span> Pruebas y demos</a>
@@ -51,6 +52,21 @@
           <article class="panel"><p class="eyebrow">ESCUCHA Y CONTACTO</p><h2>Actividad en tiempo real</h2><div class="meter-row"><label for="overview-meter">Nivel del micrófono</label><meter id="overview-meter" min="0" max="100" value="0">0</meter></div><p id="mic-activity">Micrófono: sin datos</p><p id="touch-activity">Trill: sin toques registrados</p><a class="text-link" href="#audio">Revisar dispositivos ↗</a></article>
           <article class="panel accent-panel"><p class="eyebrow">ANTES DE RECIBIR VISITANTES</p><h2>Una comprobación rápida</h2><p>Escucha un saludo, revisa los ojos y toca los sensores. Un minuto para empezar con tranquilidad.</p><a class="button" href="#tests">Ir a pruebas y demos ↗</a></article>
         </div>
+      </section>
+
+      <section data-view="visits" hidden>
+        <article class="panel">
+          <h2>Conversaciones en eventos</h2>
+          <p>Una visita corresponde a una conversación iniciada al decir Arby. No representa personas únicas. Horario de Bogotá.</p>
+          <form id="visits-form" class="actions">
+            <label>Desde<input id="visits-start" type="date"></label>
+            <label>Hasta<input id="visits-end" type="date"></label>
+            <button type="submit">Consultar</button>
+            <a id="visits-export" class="button" href="/api/visits/export.csv">Descargar CSV</a>
+          </form>
+          <p id="visits-summary" role="status" aria-live="polite"></p>
+          <div class="visits-scroll"><table class="visits-table"><thead><tr><th>Inicio</th><th>Última actividad</th><th>Cierre</th><th>Estado</th><th>Mensajes</th></tr></thead><tbody id="visits-rows"></tbody></table></div>
+        </article>
       </section>
 
       <form id="settings-form" novalidate>

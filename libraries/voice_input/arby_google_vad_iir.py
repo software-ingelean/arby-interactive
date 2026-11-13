@@ -182,12 +182,16 @@ class GoogleWorker(threading.Thread):
         generation=None,
         on_unrecognized=None,
         capture_started_at=None,
+        on_conversation_start=None,
+        on_conversation_end=None,
     ):
         super().__init__(daemon=True)
         self.jobs = jobs
         self.stop_event = stop_event
         self.language = language
         self.followup_seconds = followup_seconds
+        self.on_conversation_start = on_conversation_start
+        self.on_conversation_end = on_conversation_end
         self.on_question = on_question
         self.on_unrecognized = on_unrecognized
         self.repeat_prompt = None
@@ -296,9 +300,13 @@ class GoogleWorker(threading.Thread):
                 and self.repeat_prompt is None and self.answer_future is None
                 and (time.monotonic() if at is None else at) >= self.deadline):
             self.mode, self.deadline = 'WAKE', None
+            if self.on_conversation_end:
+                self.on_conversation_end()
             log("[CONVERSACION] Terminó la ventana de escucha. Esperando 'Arby'.")
 
     def _listen_for_command(self):
+        if self.mode == 'WAKE' and self.on_conversation_start:
+            self.on_conversation_start()
         self.mode = 'COMMAND'
         self.deadline = time.monotonic() + CONVERSATION_IDLE_SECONDS
         self.last_repeat_at = float('-inf')
@@ -383,7 +391,7 @@ class GoogleWorker(threading.Thread):
 
 class ArbyPipeline:
     def __init__(self, args, *, on_question=None, is_paused=None, on_voice_start=None,
-                 on_unrecognized=None):
+                 on_unrecognized=None, on_conversation_start=None, on_conversation_end=None):
         self.args = args
         self.is_paused = is_paused or (lambda: False)
         self.max_utterance_seconds = getattr(args, "max_utterance_seconds", 15.0)
@@ -430,6 +438,8 @@ class ArbyPipeline:
             args.language,
             args.followup_seconds,
             on_question=on_question,
+            on_conversation_start=on_conversation_start,
+            on_conversation_end=on_conversation_end,
             on_unrecognized=on_unrecognized,
             is_paused=self.is_paused,
             request_timeout=getattr(args, "request_timeout", 10.0),

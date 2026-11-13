@@ -1,4 +1,4 @@
-"""Small local support contract. SQLite never contains credentials or conversations."""
+"""Small local support contract. SQLite never contains credentials or conversation content."""
 from contextlib import closing
 from dataclasses import asdict
 import json
@@ -231,6 +231,8 @@ class SupportBridge:
                                ('running' if future else 'error', message, row['id']))
                     if future:
                         self.pending = row['id'], future, row['kind']
+            if getattr(runtime, 'visit_recorder', None):
+                self.snapshot['visits'] = runtime.visit_recorder.status
             self.snapshot['busy'] = runtime.pending_count > 0
             self.snapshot['phase'] = runtime.visual.phase
             if microphone:

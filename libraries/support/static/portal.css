@@ -197,3 +197,7 @@ footer { display: flex; justify-content: space-between; gap: 15px; color: #8a958
   .login { margin: 24px auto; padding: 28px 24px; }
 }
 @media (prefers-reduced-motion: no-preference) { button, a { transition: background-color .15s, border-color .15s; } }
+
+.visits-scroll { overflow-x: auto; }
+.visits-table { width: 100%; border-collapse: collapse; text-align: left; }
+.visits-table th, .visits-table td { padding: .75rem; border-bottom: 1px solid #ddd; white-space: nowrap; }

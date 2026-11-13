@@ -48,7 +48,7 @@ class ArbyRuntime:
     """
 
     def __init__(self, bot, tts, *, emotion_colors, queue_size=8, minimum_display=0.5,
-                 play_ambient_clip=None):
+                 play_ambient_clip=None, visit_recorder=None):
         if queue_size < 1 or minimum_display < 0:
             raise ValueError("Invalid runtime limits")
         self.bot, self.tts = bot, tts
@@ -65,6 +65,7 @@ class ArbyRuntime:
         self._ambient = None
         self._play_ambient_clip = play_ambient_clip
         self._activity_revision = 0
+        self.visit_recorder = visit_recorder
 
     @property
     def visual(self):
@@ -153,6 +154,14 @@ class ArbyRuntime:
         if not isinstance(text, str) or not text.strip():
             raise ValueError("Input text must be a nonempty string")
         return self._submit("text", text.strip())
+
+    def visit_event(self, event):
+        return self._submit('visit_' + event, None)
+
+    def submit_voice_text(self, text):
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError('Input text must be a nonempty string')
+        return self._submit('voice_text', text.strip())
 
     def submit_fixed_phrase(self, text, *, state="alegres", color=None):
         """Future sensor hook. Speak supplied text without a Gemini request."""
@@ -285,6 +294,8 @@ class ArbyRuntime:
 
     def _work(self):
         try:
+            if self.visit_recorder:
+                self.visit_recorder.recover()
             while not self._stop.is_set():
                 try:
                     request = self._queue.get(timeout=0.05)
@@ -297,12 +308,21 @@ class ArbyRuntime:
                         raise CancelledError()
                     if request.kind == "ambient":
                         reply = self._run_ambient(request)
+                    elif request.kind.startswith('visit_'):
+                        if request.kind == 'visit_start':
+                            self.bot.reset_session()
+                            self.visit_recorder.begin()
+                        else:
+                            self.visit_recorder.end()
+                        reply = None
                     elif request.kind == "reset":
                         self.bot.reset_session()
                         reply = None
                         self.events.put(("info", "Conversación reiniciada."))
                     else:
-                        if request.kind == "text":
+                        if request.kind in ("text", "voice_text"):
+                            if request.kind == "voice_text" and self.visit_recorder:
+                                self.visit_recorder.message()
                             self._set_visual("cargando", IDLE_COLOR, "loading")
                             reply, request.future.retry_requested = self._model_reply(request.payload)
                         else:
@@ -330,6 +350,8 @@ class ArbyRuntime:
                             self._ambient = None
                         self._queue.task_done()
         finally:
+            if self.visit_recorder:
+                self.visit_recorder.end('shutdown')
             self._cancel_pending()
             for client in (self.tts, self.bot):
                 try:

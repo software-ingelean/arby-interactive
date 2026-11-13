@@ -38,3 +38,11 @@ Deja la consola abierta para ver una invitación. Para oír los efectos, arranca
 - Las acciones esperan a que terminen la captura de voz, la transcripción y la ventana de pregunta abierta al decir «Arby». La voz ambiente puede aplazar una acción hasta que el micrófono vuelva a estar disponible.
 - Los guiños dejan el micrófono abierto y se interrumpen cuando el VAD detecta voz. Los efectos audibles y las invitaciones usan la pausa de captura de la aplicación. Espera a que termine un sonido para hablar por el micrófono. Una orden escrita o una reacción al toque tiene prioridad y puede detener la acción automática.
 - El bot reutiliza el índice FAISS de la instalación. En evento solo envía a Gemini las fichas públicas recuperadas con títulos `ARB-*`, `ING-*` o los temas del rescate y los frutales. Omite las instrucciones y fichas de personal y la confirmación de nombres de trabajadores. Con el contexto integrado y su índice ya construido, puedes cambiar de modo sin reconstruir el índice.
+
+## Registro de visitas
+
+En modo evento, con micrófono y sin `ARBY_DEMO`, cada activación que abre una conversación registra una visita anónima en `config/arby_settings.sqlite3`. Decir «Arby» durante una conversación activa no crea otra visita. La conversación termina tras 60 segundos de escucha desde que acaba la última respuesta; la siguiente visita empieza con el contexto del asistente limpio.
+
+El portal incluye **Visitas**, con totales de conversaciones y mensajes, filtro inclusivo por fechas de Bogotá y descarga CSV. Una conversación sin preguntas también cuenta. No se guardan nombres, audio ni transcripciones en este registro. Varias personas en una conversación cuentan como una visita, y una persona que vuelve puede contar varias veces.
+
+Los datos se conservan al reiniciar. Las visitas abiertas de una ejecución anterior aparecen como interrumpidas, sin una hora de cierre inventada. Un fallo de almacenamiento no detiene la conversación: el estado de soporte lo informa y el conteo queda marcado como incompleto, también en el CSV. Esta marca se conserva cuando vuelve a ser posible escribir en la base; los registros perdidos no se reconstruyen.

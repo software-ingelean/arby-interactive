@@ -2,6 +2,7 @@
 
 const $ = id => document.getElementById(id);
 const views = {
+  visits: ['Visitas de Arby', 'Conversaciones iniciadas durante los eventos.'],
   overview: ['¿Cómo está Arby?', 'Todo lo esencial, de un vistazo.'],
   audio: ['Escuchar y hacerse escuchar.', 'Elige los dispositivos que Arby debe recordar.'],
   experience: ['A su propio ritmo.', 'Prepara el comportamiento y la iluminación para la feria.'],
@@ -122,6 +123,7 @@ function navigate() {
   document.title = `${views[view][0]} · Arby`;
   $('savebar').hidden = !['audio', 'experience'].includes(view);
   if (!$('portal').hidden) {
+    if (view === 'visits') loadVisits().catch(error => { $('visits-summary').textContent = error.message; });
     if (view === 'audio' && (!audioInventory || Date.now() - audioChecked > 3000)) loadAudio().catch(error => notice(error.message, true));
     if (view === 'network') $('refresh-bluetooth').click();
     if (view === 'network' && !networkLoaded) $('refresh-network').click();
@@ -279,6 +281,7 @@ async function refresh() {
     updateTestButtons();
     pendingLabel();
     if (data.commands[0]) $('test-result').textContent = data.commands[0].message;
+    if (currentView() === 'visits') await loadVisits();
     if (currentView() === 'audio' && Date.now() - audioChecked > 10000) {
       await loadAudio().catch(error => { $('audio-discovery').textContent = error.message; });
     }
@@ -340,6 +343,46 @@ for (const role of ['input', 'output']) {
     pendingLabel();
   });
 }
+
+function visitsQuery() {
+  const query = new URLSearchParams();
+  if ($('visits-start').value) query.set('start', $('visits-start').value);
+  if ($('visits-end').value) query.set('end', $('visits-end').value);
+  return query.toString();
+}
+async function loadVisits() {
+  try {
+    const query = visitsQuery();
+    const data = await api(`/api/visits?${query}`);
+    $('visits-export').href = `/api/visits/export.csv?${query}`;
+    $('visits-summary').textContent = `${data.total} visitas · ${data.messages} mensajes.` +
+      (data.incomplete ? ' Conteo incompleto: hubo fallos de almacenamiento.' : '') +
+      (data.error ? ` ${data.error}` : '');
+    $('visits-summary').classList.toggle('error', data.incomplete);
+    $('visits-rows').replaceChildren();
+    const format = value => value ? new Date(value).toLocaleString('es-CO', {timeZone: 'America/Bogota'}) : '—';
+    const reasons = {timeout: 'Finalizada', shutdown: 'Cierre del programa', interrupted: 'Interrumpida'};
+    for (const visit of data.visits) {
+      const row = document.createElement('tr');
+      for (const value of [format(visit.started_at), format(visit.last_activity_at), format(visit.ended_at),
+        reasons[visit.close_reason] || 'Activa', visit.messages]) {
+        const cell = document.createElement('td');
+        cell.textContent = value;
+        row.append(cell);
+      }
+      $('visits-rows').append(row);
+    }
+    if (!data.visits.length) $('visits-summary').textContent += ' Sin visitas en este período.';
+  } catch (error) {
+    $('visits-rows').replaceChildren();
+    $('visits-summary').textContent = `Conteo no disponible: ${error.message}`;
+    throw error;
+  }
+}
+$('visits-form').addEventListener('submit', event => {
+  event.preventDefault();
+  guarded(event.submitter, loadVisits);
+});
 
 $('login-form').addEventListener('submit', event => {
   event.preventDefault();

@@ -289,8 +289,10 @@ def main():
                         audio_device=args.audio_device,
                         player_context=getattr(tts, "_player_context", None),
                     )
+                from libraries.core.arby_visits import VisitRecorder
                 runtime = ArbyRuntime(
                     bot, tts, emotion_colors=palette,
+                    visit_recorder=VisitRecorder(support.database) if event_mode and args.input_mode == "voice" and not args.demo else None,
                     play_ambient_clip=ambient_audio.play if ambient_audio else None,
                 ).start()
                 clients.pop_all()  # Ownership is now held by the runtime worker.

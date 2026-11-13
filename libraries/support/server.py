@@ -1,6 +1,8 @@
 """Authenticated LAN portal. Run with python -m libraries.support.server."""
 from contextlib import closing
 from datetime import timedelta
+import csv
+import io
 import hmac
 import os
 import secrets
@@ -35,6 +37,8 @@ def system_action(action, **values):
 def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_action):
     database = Path(database)
     initialize(database)
+    from libraries.core.arby_visits import initialize as initialize_visits, report, BOGOTA
+    initialize_visits(database)
     app = Flask(__name__)
     app.config.update(SECRET_KEY=secrets.token_hex(32), MAX_CONTENT_LENGTH=8192,
                       SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Strict',
@@ -84,6 +88,34 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
     @app.get('/assets/arby.webp')
     def brand_asset():
         return send_file(Path(__file__).resolve().parents[2] / 'assets' / 'arby.webp', mimetype='image/webp')
+
+    def visits_report():
+        result = report(database, request.args.get('start'), request.args.get('end'))
+        status = runtime_status(database)
+        health = status.get('visits', {})
+        result['incomplete'] = result['incomplete'] or bool(health.get('incomplete'))
+        result['error'] = health.get('error')
+        return result
+
+    @app.get('/api/visits')
+    def visits():
+        return jsonify(visits_report())
+
+    @app.get('/api/visits/export.csv')
+    def export_visits():
+        from datetime import datetime
+        result = visits_report()
+        output = io.StringIO(newline='')
+        writer = csv.writer(output)
+        writer.writerow(['id', 'inicio_America_Bogota', 'ultima_actividad_America_Bogota',
+                         'cierre_America_Bogota', 'motivo_cierre', 'mensajes', 'conteo_incompleto'])
+        for visit in result['visits']:
+            dates = [datetime.fromisoformat(visit[key]).astimezone(BOGOTA).isoformat()
+                     if visit[key] else '' for key in ('started_at', 'last_activity_at', 'ended_at')]
+            writer.writerow([visit['id'], *dates, visit['close_reason'] or 'active',
+                             visit['messages'], result['incomplete']])
+        return app.response_class(output.getvalue(), mimetype='text/csv', headers={
+            'Content-Disposition': 'attachment; filename="arby-visitas.csv"'})
 
     @app.get('/api/session')
     def session_info():

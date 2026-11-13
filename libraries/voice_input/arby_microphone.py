@@ -14,10 +14,13 @@ class MicrophoneInput:
         self.input_done = input_done
         self.resume_at = 0.0
         self.error = None
+        self.track_visits = getattr(runtime, "visit_recorder", None) is not None
         self.pipeline = ArbyPipeline(config, on_question=self.submit,
                                      on_unrecognized=self.request_repetition,
                                      is_paused=self.is_paused,
-                                     on_voice_start=runtime.interrupt_ambient)
+                                     on_voice_start=runtime.interrupt_ambient,
+                                     on_conversation_start=(lambda: runtime.visit_event('start')) if self.track_visits else None,
+                                     on_conversation_end=(lambda: runtime.visit_event('end')) if self.track_visits else None)
         self.thread = threading.Thread(target=self.run, name="arby-microphone", daemon=True)
 
     def is_paused(self):
@@ -31,9 +34,12 @@ class MicrophoneInput:
         return self.pipeline.when_idle(lambda: self.runtime.try_submit_ambient(action))
 
     def submit(self, text):
-        if not self.is_paused():
+        # The pipeline already excludes playback before delivering recognized text.
+        # A queued visit-start reset must not discard its accompanying question.
+        if self.track_visits or not self.is_paused():
             self.runtime.events.put(("info", f"Tú: {text}"))
-            return self.runtime.submit_text(text)
+            return (self.runtime.submit_voice_text(text) if self.track_visits
+                    else self.runtime.submit_text(text))
 
     def request_repetition(self):
         if not self.is_paused():
