@@ -8,9 +8,13 @@ import logging
 import math
 import os
 import signal
+import sqlite3
 import threading
 import time
 
+from libraries.audio.arby_devices import load_selection, apply_selection
+from libraries.core.arby_support import SupportBridge, load_overrides, CONTROLS
+from dataclasses import asdict
 from libraries.core.arby_env import load_environment
 from libraries.audio.arby_audio_recovery import close_strip_and_recover_audio
 from libraries.simulation.arby_demo_bot import DemoBot
@@ -58,6 +62,7 @@ def load_config():
         "slowdown": (int, 2, None),
         "swap_eyes": (bool, False, None),
         "model": (str, None, None),
+        "model_cooldown_seconds": (float, 60.0, None),
         "bot_timeout": (float, 30.0, None),
         "voice": (str, None, None),
         "rate": (str, None, None),
@@ -70,10 +75,11 @@ def load_config():
         "demo": (bool, False, None),
         "trill": (bool, False, None),
     }
+    overrides = load_overrides()
     settings = {}
     for name, (convert, default, choices) in fields.items():
         variable = "GEMINI_MODEL" if name == "model" else f"ARBY_{name.upper()}"
-        raw = os.getenv(variable, "").strip()
+        raw = str(overrides[name]).strip() if name in overrides else os.getenv(variable, "").strip()
         value = default
         if raw:
             try:
@@ -106,12 +112,8 @@ def load_config():
     if str(mic_values["device"]).isdigit():
         mic_values["device"] = int(mic_values["device"])
     config.microphone = SimpleNamespace(**mic_values)
-    if config.audio_recover_on_exit and (
-        config.audio_driver != "alsa" or
-        config.audio_device != "plughw:CARD=Headphones,DEV=0"
-    ):
-        raise ValueError("ARBY_AUDIO_RECOVER_ON_EXIT requiere ARBY_AUDIO_DRIVER=alsa y "
-                         "ARBY_AUDIO_DEVICE=plughw:CARD=Headphones,DEV=0.")
+    if not 0 < config.model_cooldown_seconds < float("inf"):
+        raise ValueError("ARBY_MODEL_COOLDOWN_SECONDS debe ser positivo y finito.")
     if not 0 < config.bot_timeout < float("inf"):
         raise ValueError("ARBY_BOT_TIMEOUT debe ser positivo y finito.")
     if config.eyes == "matrix" and config.multiplexing is None:
@@ -125,6 +127,8 @@ def load_config():
         raise ValueError("Revisa ARBY_STRIP_GPIO (>=0), ARBY_STRIP_LEDS (>0) y ARBY_STRIP_BRIGHTNESS (0–100).")
     if not 1 <= config.matrix_brightness <= 100:
         raise ValueError("ARBY_MATRIX_BRIGHTNESS debe estar entre 1 y 100.")
+    config.audio_selection = load_selection()
+    config.audio_active = apply_selection(config, config.audio_selection)
     return config
 
 
@@ -182,11 +186,13 @@ def main():
         print("Arby se configura desde .env; ejecuta sin argumentos. Consulta .env.example.")
         return 2
     load_environment()
+    support = SupportBridge()
     try:
         args = load_config()
         strip_config = StripConfig(args.strip_gpio, args.strip_leds,
                                    args.strip_brightness / 100, args.strip_effect)
-    except ValueError as exc:
+    except (ValueError, OSError, sqlite3.Error) as exc:
+        support.finish("error")
         print(f"Configuración inválida: {exc}")
         return 2
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
@@ -194,8 +200,23 @@ def main():
     try:
         with ExitStack() as stack:
             ambient_settings = load_ambient_settings()
+            support.snapshot['effective'] = {
+                'ambient': asdict(ambient_settings),
+                'audio': args.audio_selection,
+                'controls': {key: (getattr(args, key) if key != 'rate' else args.rate or '+12%') for key in CONTROLS},
+            }
+            support.snapshot['audio_active'] = args.audio_active
+            support.snapshot['capabilities'] = {'eyes': args.eyes != 'none', 'strip': args.strip,
+                                                'microphone': args.input_mode == 'voice', 'speaker': not args.mute}
+            support.snapshot['components'] = {
+                'trill': {'state': 'disabled' if not args.trill else 'unknown', 'detail': 'Desactivado.' if not args.trill else 'Pendiente de inicializar.'},
+                'microphone': {'state': 'disabled' if args.input_mode != 'voice' else 'unknown', 'detail': 'Entrada por consola.' if args.input_mode != 'voice' else 'Pendiente de inicializar.'},
+                'speaker': {'state': 'disabled' if args.mute else 'unknown', 'detail': 'Voz desactivada.' if args.mute else 'Sin comprobar.'},
+                'eyes': {'state': 'disabled' if args.eyes == 'none' else 'unknown', 'detail': 'Desactivados.' if args.eyes == 'none' else 'Pendientes de inicializar.'},
+                'strip': {'state': 'disabled' if not args.strip else 'unknown', 'detail': 'Simulada.' if not args.strip else 'Pendiente de inicializar.'},
+            }
             event_mode = ambient_settings.mode == "evento"
-            ambient = AmbientSequence(ambient_settings) if event_mode else None
+            ambient = AmbientSequence(ambient_settings, speak=not args.mute)
             print(f"Estado: modo {ambient_settings.mode}.", flush=True)
             touch = None
             if args.trill:
@@ -239,7 +260,10 @@ def main():
                 bot = ArbyBot(config=BotConfig(
                     model=args.model or BotConfig().model,
                     timeout_seconds=args.bot_timeout,
-                    event_mode=event_mode))
+                    event_mode=event_mode,
+                    fallback_models=tuple(model.strip() for model in os.getenv(
+                        "GEMINI_FALLBACK_MODELS", "gemini-flash-lite-latest").split(",") if model.strip()),
+                    model_cooldown_seconds=args.model_cooldown_seconds))
                 palette = EMOTION_COLORS
             # Until runtime starts, protect client cleanup during partial startup.
             with ExitStack() as clients:
@@ -284,22 +308,29 @@ def main():
                 reader = threading.Thread(target=_console, args=(runtime, stop, input_done),
                                           name="arby-console", daemon=True)
                 reader.start()
+            support.snapshot['state'] = 'ready'
+            for name in ('trill', 'microphone', 'eyes', 'strip'):
+                component = support.snapshot['components'][name]
+                if component['state'] != 'disabled':
+                    component.update(state='ready', detail='Inicializado; confirma la respuesta físicamente.' if name in ('eyes', 'strip') else 'Inicializado y atendiendo lecturas.')
             revision = -1
             activity_revision = 0
             submit_ambient = (microphone.try_submit_ambient if microphone is not None
                               else runtime.try_submit_ambient)
             while not stop.is_set():
                 started = time.monotonic()
-                if touch:
-                    touch.update(runtime, started)
+                touch_active = touch is not None and touch.update(runtime, started)
+                if touch_active:
+                    runtime.interrupt_ambient()
                 if preview and preview.requested_stop():
                     stop.set()
                     break
-                if ambient and not input_done.is_set():
+                if touch is not None or not input_done.is_set():
                     busy, current_revision = runtime.visitor_activity
-                    visitor_active = busy or current_revision != activity_revision
+                    visitor_active = touch_active or busy or current_revision != activity_revision
                     activity_revision = current_revision
                     ambient.tick(started, visitor_active=visitor_active, submit=submit_ambient)
+                support.tick(runtime, microphone, tts, touch, submit_ambient)
                 visual = runtime.visual
                 if visual.revision != revision:
                     eyes.set_state(visual.matrix_state, color=visual.color, now=started)
@@ -322,8 +353,10 @@ def main():
     except KeyboardInterrupt:
         stop.set()
     except Exception as exc:
+        support.finish("error")
         print(f"No se pudo ejecutar Arby: {type(exc).__name__}: {exc}")
         return 1
+    support.finish("stopped")
     return 0
 
 

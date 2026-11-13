@@ -18,6 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+support = ["flask>=3.1,<4", "waitress>=3,<4"]
 led = [
     "adafruit-blinka",
     "adafruit-circuitpython-neopixel",

@@ -1,0 +1,192 @@
+# Portal local de soporte
+
+El portal vive en la Raspberry, funciona sin cargar recursos de internet y sigue
+respondiendo aunque Arby esté detenido. Abre `http://IP-DE-LA-RASPBERRY:8080` desde
+el celular en la misma red o `http://localhost:8080` en la pantalla local.
+No está diseñado para publicarse en internet. Usa una red local de confianza:
+el acceso HTTP local no cifra la clave en tránsito.
+
+## Qué incluye
+
+- Estado actualizado cada tres segundos: Arby, Trill, micrófono, altavoz, ojos y tira.
+- Vistas separadas: Resumen, Audio, Experiencia, Pruebas, Conexión y Equipo.
+- Selector de micrófono y altavoz predeterminados, canal de entrada y medidor de nivel.
+- Modo oficina/evento, tiempos, silencio de voz, velocidad, ganancia y brillo.
+- Saludo, invitación, prueba de sonido, cuatro expresiones y tres colores de tira;
+  cancelación de la demostración sin cancelar conversaciones. Observación de actividad
+  del micrófono y último toque Trill, sin grabar audio ni conversaciones.
+- Redes Wi-Fi mediante NetworkManager y `wlan0`; reinicio de Arby y Raspberry,
+  y apagado del sistema con confirmación.
+- Conserva el hotspot instalado en `wlan1`; no cambia su perfil ni el controlador USB.
+
+«Funcionando» en luces confirma inicialización y ejecución sin error conocido;
+la comprobación visual corresponde al operador. En audio, se informa «Sin
+comprobar» hasta completar reproducción sin error, y el operador debe confirmar
+que se escucha. Con el proceso detenido o el estado de más de ocho segundos,
+los componentes dejan de mostrarse como operativos.
+
+Guardar no reinicia nada. «Aplicar y reiniciar Arby» interrumpe la conversación,
+libera los recursos y vuelve a iniciar con los ajustes guardados. Esos ajustes
+tienen prioridad sobre `.env` solo para los controles del portal. Cableado,
+modelos y claves siguen en `.env`. Sin una selección de audio en el panel, los
+dispositivos conservan los valores de `.env`. Para volver a usar exclusivamente
+los valores del entorno en esos controles, con Arby detenido elimina la fila de
+`support_settings` (no la base de datos completa).
+
+## Selección estable de audio
+
+En **Audio y dispositivos**, pulsa «Buscar dispositivos», elige la entrada y la
+salida y guarda. Los selectores muestran hardware ALSA físico sin abrirlo, así
+que siguen funcionando cuando el servicio Arby está detenido. Las salidas sin
+captura nunca se ofrecen como micrófono. La detección utiliza `/proc/asound/pcm`
+y sysfs, sin permisos de administrador ni paquetes nuevos.
+
+Se guardan controlador, modelo, USB VID/PID, número de serie si existe, puerto y
+canal PCM en `support_audio_settings`. No se guarda el índice de tarjeta ALSA ni
+el índice PortAudio. Al arrancar se busca la identidad y se resuelve el índice
+actual de entrada o la ruta ALSA actual para salida:
+
+- Con número de serie, se exige esa unidad aunque se conecte a otro puerto.
+- Sin serie, se prefiere el mismo puerto; si cambió, solo se acepta una coincidencia
+  única de modelo/controlador. Dos unidades ambiguas requieren nueva selección.
+- No basta con el controlador: varios adaptadores distintos usan `snd-usb-audio`.
+- Si falta el predeterminado, el panel lo indica y Arby no cambia silenciosamente a
+  otro dispositivo. El servicio puede reintentar su arranque hasta que vuelva.
+- Elegir «Usar configuración instalada» restaura la selección de `.env` para ese rol.
+- La resolución se hace al iniciar Arby. Después de cambiar o reconectar hardware,
+  usa «Aplicar y reiniciar Arby»; no se reabre el micrófono en medio de una frase.
+
+El indicador de nivel es RMS de la entrada S32 normalizada y del canal seleccionado;
+se actualiza con la telemetría, sin guardar muestras. No mide el volumen del altavoz.
+Las demos se ejecutan con la configuración aplicada; los cambios guardados siguen
+pendientes hasta reiniciar. Los colores de prueba pueden afectar también el color
+de los ojos porque comparten la salida visual de Arby.
+
+## Actualizar una instalación existente
+
+Desde el checkout actualizado en la Raspberry, conserva módulos locales como
+`rgbmatrix` usando `--inexact` si necesitas sincronizar dependencias. Esta versión
+no añade dependencias nuevas. Reinstala el ayudante para habilitar el apagado:
+
+```bash
+cd ~/arby-interactive
+sudo install -o root -g root -m 644 deploy/arby-system.py /usr/local/libexec/arby-system.py
+sudo systemctl restart arby-portal.service arby.service
+```
+
+No cambió la regla sudoers ni las plantillas de servicios. La tabla de preferencias
+se crea automáticamente al iniciar el portal o la telemetría; los ajustes existentes
+se conservan. Recarga el navegador para obtener las nuevas vistas. Prueba el apagado
+solo cuando puedas volver a encender físicamente la Raspberry.
+
+## Instalación en Raspberry Pi OS
+
+Se necesitan `systemd`, `sudo` y NetworkManager (`nmcli`). Los ejemplos asumen
+`/home/arley/arby-interactive`: **sustituye esa ruta por el checkout real**, accesible en lectura
+y ejecución al usuario `arby-portal`, incluidos sus directorios padres. Los ejemplos
+no trasladan el proyecto ni cambian tu configuración de hardware.
+
+1. Instala el extra desde la raíz del proyecto, conservando los extras de hardware
+   que ya uses: `uv sync --inexact --extra support --extra voice --extra led`.
+   Usa `--inexact` para conservar módulos instalados localmente, como el binding
+   personalizado `rgbmatrix`, que no está declarado en `pyproject.toml`.
+   Si ya se eliminó, reinstálalo desde tu checkout local siguiendo
+   [la guía de matrices](MATRIZ_OE_GPIO5.md), conservando el mapeo personalizado.
+2. Crea la cuenta y prepara el directorio compartido. Detén previamente cualquier
+   ejecución manual de Arby para evitar dos procesos usando el mismo hardware.
+
+```bash
+sudo groupadd --system arby-support
+sudo useradd --system --gid arby-support --no-create-home --shell /usr/sbin/nologin arby-portal
+sudo install -d -o root -g arby-support -m 2770 /home/arley/arby-interactive/config
+sudo chgrp arby-support /home/arley/arby-interactive/config/arby_settings.sqlite3
+sudo chmod 660 /home/arley/arby-interactive/config/arby_settings.sqlite3
+```
+
+Los dos últimos comandos solo aplican si la base ya existe. Si aún no existe,
+el portal la creará con el grupo compartido. No cambies permisos de `.env`
+para dar acceso al portal: el servidor web no necesita leerla. Mantén `.env`
+legible para quien ejecute Arby y fuera del acceso del usuario del portal.
+Las credenciales del portal se configuran aparte.
+
+3. Genera un hash (la clave se solicita sin mostrarla):
+
+```bash
+.venv/bin/python -c 'from getpass import getpass; from werkzeug.security import generate_password_hash; print(generate_password_hash(getpass("Clave de soporte: ")))'
+```
+
+Crea `/etc/arby/portal.env` con propietario `root:arby-support` y modo `0640`:
+
+```text
+ARBY_PORTAL_PASSWORD_HASH=PEGA_EL_HASH_GENERADO
+ARBY_PORTAL_HOST=0.0.0.0
+ARBY_PORTAL_PORT=8080
+```
+
+El servidor exige un hash, limita intentos de acceso y protege acciones con una
+sesión y token CSRF. Las sesiones caducan tras cuatro horas sin uso y también al
+reiniciar el portal. Para cambiar la clave, reemplaza el hash y reinicia el portal.
+
+4. Instala el ayudante privilegiado. **Debe ser una copia propiedad de root**,
+   nunca un enlace a un archivo modificable por el servidor web.
+
+```bash
+sudo install -d -o root -g root -m 755 /usr/local/libexec
+sudo install -o root -g root -m 644 deploy/arby-system.py /usr/local/libexec/arby-system.py
+sudo visudo -cf deploy/arby-portal.sudoers
+sudo install -o root -g root -m 440 deploy/arby-portal.sudoers /etc/sudoers.d/arby-portal
+```
+
+El ayudante solo admite consultar red, conectar `wlan0`, reiniciar `arby.service`
+y programar un reinicio o apagado del equipo. No ejecuta shell ni acepta nombres de
+servicios o interfaces elegidos por el navegador. La contraseña Wi-Fi viaja por
+stdin y por un archivo temporal privado; no aparece en argumentos de procesos.
+NetworkManager conserva la conexión para próximos arranques.
+
+5. Copia las plantillas de `deploy/systemd/` a `/etc/systemd/system/` y reemplaza
+   **todas** las apariciones de `@PROJECT_DIR@` por la ruta absoluta del proyecto.
+   Las plantillas requieren una ruta sin espacios. Si ya tienes un servicio Arby,
+   adapta el existente en lugar de iniciar otro proceso paralelo.
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now arby-portal.service arby.service
+sudo systemctl status arby-portal.service arby.service
+```
+
+El servicio Arby conserva root por el hardware, como el arranque documentado del
+proyecto. El portal usa una cuenta restringida y solo puede escribir en `config`.
+El servicio Arby está pensado para el perfil `ARBY_INPUT_MODE=voice` y ojos físicos
+o `none`; la consola de texto y la ventana de previsualización requieren sesión
+interactiva y no se deben usar como perfil de feria sin escritorio.
+
+## Ejecución manual y desarrollo
+
+Instala `uv sync --inexact --extra support` y exporta `ARBY_PORTAL_PASSWORD_HASH` con el hash
+generado. Ejecuta `.venv/bin/python -m libraries.support.server`.
+Para publicar el estado del proceso manual usa `ARBY_SUPPORT=true
+.venv/bin/python run_arby.py` en una sola línea, con los permisos habituales del
+hardware. El portal no inicia otro proceso de Arby por su cuenta. Sin instalar
+el ayudante y los servicios, red y reinicios devolverán un error explicativo;
+el resto del panel puede probarse localmente.
+
+La base usa tablas separadas para ajustes, instantánea y comandos, sin guardar
+secretos ni frases de visitantes. Las solicitudes de prueba caducan a los treinta
+segundos y se limpian después de un día. La telemetría se limita a una escritura
+por segundo y sus fallos no detienen la conversación. El portal no consume la
+cola de eventos de consola.
+
+## Comprobación en la feria
+
+1. Abre el panel en celular y pantalla local; verifica acceso con y sin clave.
+2. Comprueba micrófono hablando y Trill tocando cada zona; mira el estado físico.
+3. Ejecuta las pruebas de sonido y ojos con Arby libre y verifica el resultado.
+4. Guarda un intervalo nuevo: no debe cambiar nada hasta aplicar y reiniciar.
+5. Reinicia Arby: el portal debe seguir abierto y recuperar un estado reciente.
+6. Prueba cambio de Wi-Fi y reinicio completo con acceso SSH alternativo disponible.
+
+Diagnóstico por SSH: `journalctl -u arby -u arby-portal -n 80`.
+El portal no expone esos registros porque pueden contener conversaciones.
+Si falta NetworkManager o hay problemas de permisos, el panel sigue disponible
+y muestra el fallo de la acción. No cambies la red de la Raspberry automáticamente
+al instalar este portal.

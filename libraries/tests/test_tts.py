@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from libraries.audio.arby_recordings import REPEAT_QUESTION, recording_path
 from libraries.audio.arby_tts import ArbyTTS, TTSConfig
 from libraries.audio.plant_speech import PlantSpeech
 from libraries.audio.arby_tts import _connection_detail
@@ -18,6 +19,24 @@ from libraries.audio.arby_tts import _connection_detail
 
 @unittest.skipUnless(shutil.which("ffplay"), "ffplay not installed")
 class SynthesisRetryTests(unittest.TestCase):
+    def test_recording_skips_synthesis_for_matching_voice_profile(self):
+        synthesized = []
+
+        async def stream(text):
+            synthesized.append(text)
+            yield {"type": "audio", "data": b"online"}
+
+        with TemporaryDirectory() as folder, patch(
+            "libraries.audio.arby_recordings.RECORDINGS_DIR", Path(folder),
+        ):
+            with ArbyTTS(stream_factory=stream) as tts:
+                recording_path(tts.config, REPEAT_QUESTION).write_bytes(b"local")
+                self.assertEqual(asyncio.run(tts._collect_audio(REPEAT_QUESTION)), b"local")
+                self.assertEqual(synthesized, [])
+            with ArbyTTS(TTSConfig(rate="+8%"), stream_factory=stream) as tts:
+                self.assertEqual(asyncio.run(tts._collect_audio(REPEAT_QUESTION)), b"online")
+            self.assertEqual(synthesized, [REPEAT_QUESTION])
+
     def test_retry_discards_partial_mp3_before_starting_again(self):
         attempts = []
         closed = []

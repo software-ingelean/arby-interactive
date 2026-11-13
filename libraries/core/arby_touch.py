@@ -4,6 +4,7 @@ import json
 import math
 from pathlib import Path
 import random
+import time
 
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "triki_config.json"
 
@@ -168,16 +169,18 @@ class TouchReactions:
         self.ready_at = 0.0
         self.pending = None
         self.previous = {}
+        self.last_touch = None
 
     def update(self, runtime, now):
         if self.pending is not None and self.pending.done():
             self.pending = None
             self.ready_at = now + self.cfg["speech_cooldown_seconds"]
         if now < self.next_read:
-            return
+            return self.detector.active is not None
         self.next_read = now + self.cfg["poll_seconds"]
         events = self.detector.update(self.reader.read(), now)
         for kind, channel in events:
+            self.last_touch = {"zone": kind, "channel": channel, "at": time.time()}
             if self.pending is not None or runtime.pending_count or now < self.ready_at:
                 continue
             choices = [phrase for phrase in PHRASES[kind] if phrase != self.previous.get(kind)]
@@ -185,3 +188,4 @@ class TouchReactions:
             self.pending = runtime.submit_fixed_phrase(phrase, state=STATES[kind])
             self.previous[kind] = phrase
             runtime.events.put(("info", f"Toque {kind}, canal {channel}"))
+        return self.detector.active is not None

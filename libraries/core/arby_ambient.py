@@ -13,6 +13,8 @@ import subprocess
 import time
 from typing import Callable
 
+from libraries.audio.arby_recordings import EVENT_PHRASES
+
 
 DEFAULT_DATABASE = Path(__file__).resolve().parents[2] / "config" / "arby_settings.sqlite3"
 CLIP_DIRECTORY = DEFAULT_DATABASE.parents[1] / "assets" / "ambient"
@@ -95,6 +97,7 @@ class AmbientAction:
     matrix_state: str
     text: str = ""
     duration_seconds: float = 0
+    color: tuple[int, int, int] | None = None
 
 
 GESTURES = (
@@ -161,61 +164,62 @@ class AmbientAudio:
 
 
 class AmbientSequence:
-    """Called from the render loop. The runtime owns every accepted action.
+    """Schedule phrases after inactivity and gestures in event mode."""
 
-    visitor_active covers submitted conversation and touch work. The submit
-    callback admits an action only when runtime and capture are available,
-    returning its Future or None. Background VAD delays admission without
-    restarting the timers. The runtime handles interruption of accepted work.
-    """
+    PHRASE_INTERVAL = 300.0
 
-    def __init__(self, settings: AmbientSettings, *, rng=None):
+    def __init__(self, settings: AmbientSettings, *, speak=True, rng=None):
         self.settings = settings
         self._rng = rng if rng is not None else Random()
+        self._phrases = (*EVENT_PHRASES, *(action.text for action in INVITATIONS)) if speak else ()
         self._gesture_at = None
-        self._invitation_at = None
+        self._phrase_at = None
         self._future = None
-        self._resume_at = 0.0
+        self._playing_phrase = False
+        self._retry_at = 0.0
         self._gesture_index = 0
-        self._invitation_index = 0
+        self._phrase_index = 0
 
     def tick(self, now: float, *, visitor_active: bool,
              submit: Callable[[AmbientAction], Future | None]):
-        """Advance the sequence without sleeping or generating a backlog."""
-        if self.settings.mode != "evento":
-            return
+        """Run at most one action, with no backlog of missed phrases."""
         if visitor_active:
-            self._gesture_at = self._invitation_at = None
+            self._gesture_at = self._phrase_at = None
             return
+
         if self._future is not None:
             if not self._future.done():
                 return
+            if self._playing_phrase:
+                if not self._future.cancelled() and self._future.exception() is None:
+                    self._phrase_index = (self._phrase_index + 1) % len(self._phrases)
+                self._phrase_at = None
+            elif self._gesture_at is not None:
+                self._gesture_at = max(self._gesture_at, now + 10)
             self._future = None
-            self._resume_at = now + 10
-        if self._gesture_at is None:
+
+        if self._phrases and self._phrase_at is None:
+            self._phrase_at = now + self.PHRASE_INTERVAL
+        if self.settings.mode == "evento" and self._gesture_at is None:
             self._gesture_at = now + self._rng.uniform(*self.settings.gesture_range)
-            self._invitation_at = now + self._rng.uniform(*self.settings.invitation_range)
-        if now < self._resume_at:
+        if now < self._retry_at:
             return
 
-        invitation_due = now >= self._invitation_at
-        if invitation_due:
-            action = INVITATIONS[self._invitation_index]
-        elif now >= self._gesture_at:
+        phrase_due = self._phrase_at is not None and now >= self._phrase_at
+        if phrase_due:
+            action = AmbientAction("phrase", "alegres", self._phrases[self._phrase_index])
+        elif self._gesture_at is not None and now >= self._gesture_at:
             action = GESTURES[self._gesture_index]
         else:
             return
 
         pending = submit(action)
         if pending is None:
-            # Retry admission later, keeping the same action and due time.
-            self._resume_at = now + 0.5
+            self._retry_at = now + 0.5
             return
         self._future = pending
-        if invitation_due:
-            self._invitation_index = (self._invitation_index + 1) % len(INVITATIONS)
-            self._invitation_at = now + self._rng.uniform(*self.settings.invitation_range)
-        else:
+        self._playing_phrase = phrase_due
+        if not phrase_due:
             self._gesture_index = (self._gesture_index + 1) % len(GESTURES)
             self._gesture_at = now + self._rng.uniform(*self.settings.gesture_range)
 

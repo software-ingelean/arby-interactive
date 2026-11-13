@@ -13,6 +13,7 @@ from libraries.core.arby_response import (
     EMOTION_COLORS, MAX_SEGMENTS, RESPONSE_SCHEMA, make_segment,
     make_reply, normalize_reply, parse_reply,
 )
+from libraries.audio.arby_recordings import BOT_ERROR, BOT_TRY_LATER, REPEAT_QUESTION
 from libraries.core.arby_runtime import ArbyRuntime
 
 
@@ -132,9 +133,16 @@ class SegmentedRuntimeTests(unittest.TestCase):
         bad = sample()
         bad["segments"][1]["response"] = " "
         runtime, tts, _ = self.create(bad)
-        with self.assertRaises(ValueError):
-            runtime.submit_text("Question").result(timeout=1)
-        self.assertEqual(tts.spoken, [])
+        future = runtime.submit_text("Question")
+        self.assertEqual(tts.started.get(timeout=1), 0)
+        self.assertEqual(tts.spoken, [BOT_ERROR])
+        tts.gates[0].set()
+        self.assertEqual(tts.started.get(timeout=1), 1)
+        tts.gates[1].set()
+        future.result(timeout=1)
+        self.assertTrue(future.retry_requested)
+        self.assertEqual(tts.spoken, [BOT_ERROR, BOT_TRY_LATER])
+        self.assertNotIn(sample()['segments'][0]['response'], tts.spoken)
 
     def test_shutdown_during_first_segment_cancels_remaining_segments(self):
         runtime, tts, _ = self.create(sample())
@@ -188,6 +196,7 @@ class BotContractTests(unittest.TestCase):
         self.assertIn("Sí Luis, eso también me pasa", instructions)
         self.assertIn("No separes por", instructions)
         self.assertIn("segments", json.loads(self.bot._history[0][1]))
+        self.assertIn(REPEAT_QUESTION, instructions)
 
     def test_failure_is_segmented_and_not_stored(self):
         self.client.models.generate_content.side_effect = TimeoutError("test")
@@ -199,6 +208,23 @@ class BotContractTests(unittest.TestCase):
     def test_empty_input_does_not_call_provider(self):
         self.assertEqual(self.bot.respond(" "), {"segments": [], "response": ""})
         self.client.models.generate_content.assert_not_called()
+
+
+class RecoveryRecordingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_error_prompts_use_local_recordings_without_synthesis(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from libraries.audio.arby_tts import ArbyTTS
+        with TemporaryDirectory() as folder, patch('libraries.audio.arby_tts.shutil.which', return_value='/fake/ffplay'):
+            path = Path(folder) / 'recorded.mp3'
+            path.write_bytes(b'cached-audio')
+            synthesize = Mock(side_effect=AssertionError('Network synthesis must not be used'))
+            tts = ArbyTTS(stream_factory=synthesize)
+            self.addCleanup(tts.close)
+            with patch('libraries.audio.arby_tts.recording_path', return_value=path):
+                for text in (REPEAT_QUESTION, BOT_ERROR, BOT_TRY_LATER):
+                    self.assertEqual(await tts._collect_audio(text), b'cached-audio')
+            synthesize.assert_not_called()
 
 
 if __name__ == "__main__":

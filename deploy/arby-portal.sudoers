@@ -1,0 +1,2 @@
+# Install with owner root:root, mode 0440; validate with visudo -cf first.
+arby-portal ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/arby-system.py

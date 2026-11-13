@@ -1,15 +1,70 @@
 """Offline contracts for queueing, coordinated colors, cleanup and startup."""
-from concurrent.futures import CancelledError
+from concurrent.futures import CancelledError, Future
 import sys
 import threading
 import unittest
 from unittest.mock import patch
 
+from libraries.audio.arby_recordings import EVENT_PHRASES, BOT_ERROR, BOT_TRY_LATER, REPEAT_QUESTION
+from libraries.core.arby_ambient import AmbientSequence, AmbientSettings, INVITATIONS
 from libraries.core.arby_runtime import ArbyRuntime, validate_reply
 from libraries.leds.arby_strip_led import LedStripController, StripConfig
 from libraries.eyes.matrix_output import MatrixOutput
 import run_arby
 from libraries.simulation.arby_memory_pixels import MemoryPixels
+
+
+class AmbientPhraseTests(unittest.TestCase):
+    def test_activity_restarts_countdown_and_playback_completion_starts_next_interval(self):
+        scheduler = AmbientSequence(AmbientSettings())
+        submitted = []
+
+        def submit(action):
+            future = Future()
+            submitted.append((action, future))
+            return future
+
+        def tick(now, active=False):
+            scheduler.tick(now, visitor_active=active, submit=submit)
+
+        tick(0)
+        tick(299, active=True)
+        tick(305, active=True)
+        tick(306)
+        tick(605.999)
+        self.assertEqual(submitted, [])
+        tick(606)
+        self.assertEqual(submitted[0][0].text, EVENT_PHRASES[0])
+        tick(612)
+        self.assertEqual(len(submitted), 1)
+        submitted[0][1].set_result(None)
+        tick(613)
+        tick(912.999)
+        self.assertEqual(len(submitted), 1)
+        tick(913)
+        self.assertEqual(submitted[1][0].text, EVENT_PHRASES[1])
+
+    def test_rotation_plays_event_phrases_and_invitations_in_order(self):
+        settings = AmbientSettings(mode="evento", gesture_min_seconds=20000,
+                                   gesture_max_seconds=20000)
+        scheduler = AmbientSequence(settings)
+        expected = [*EVENT_PHRASES, *(action.text for action in INVITATIONS)]
+        spoken = []
+
+        def submit(action):
+            self.assertEqual(action.kind, "phrase")
+            spoken.append(action.text)
+            future = Future()
+            future.set_result(None)
+            return future
+
+        scheduler.tick(0, visitor_active=False, submit=submit)
+        for index in range(1, len(expected) + 2):
+            scheduler.tick(index * 301 - 1, visitor_active=False, submit=submit)
+            scheduler.tick(index * 301, visitor_active=False, submit=submit)
+        self.assertEqual(len(spoken), len(expected) + 1)
+        self.assertEqual(spoken[:-1], expected)
+        self.assertEqual(spoken[-1], spoken[0])
 
 
 PALETTE = {"alegres": (0, 255, 80), "enojado": (255, 0, 0)}
@@ -134,10 +189,89 @@ class RuntimeTests(unittest.TestCase):
         bad["strip_led"]["color"]["r"] = 999
         bot.respond = lambda text: bad if text == "bad" else good
         runtime, bot, tts = self.create(bot=bot)
-        with self.assertRaises(ValueError):
-            runtime.submit_text("bad").result(timeout=1)
-        runtime.submit_text("good").result(timeout=1)
-        self.assertEqual(tts.spoken, ["Hello"])
+        failed = runtime.submit_text("bad")
+        failed.result(timeout=1)
+        self.assertTrue(failed.retry_requested)
+        success = runtime.submit_text("good")
+        success.result(timeout=1)
+        self.assertFalse(success.retry_requested)
+        self.assertEqual(tts.spoken, [BOT_ERROR, BOT_TRY_LATER, "Hello"])
+
+    def test_query_exception_speaks_fallback_once_and_worker_recovers(self):
+        bot = FakeBot()
+        def respond(text):
+            if text == 'fail':
+                raise TimeoutError('private provider details')
+            return make_reply(text)
+        bot.respond = respond
+        runtime, _, tts = self.create(bot=bot)
+        future = runtime.submit_text('fail')
+        reply = future.result(timeout=1)
+        self.assertTrue(future.retry_requested)
+        self.assertEqual(tts.spoken, [BOT_ERROR, BOT_TRY_LATER])
+        self.assertNotIn('private', reply['response'])
+        runtime.submit_text('recovered').result(timeout=1)
+        self.assertEqual(tts.spoken[-1], 'recovered')
+
+    def test_existing_bot_fallback_is_not_announced_twice(self):
+        bot = FakeBot()
+        bot.last_error = 'TimeoutError'
+        bot.respond = lambda text: {'segments': [
+            {'matrix_state': 'pensativos', 'strip_led': {'color': {'r': 120, 'g': 60, 'b': 255}, 'mood': 'pensativos'}, 'response': BOT_ERROR},
+            {'matrix_state': 'duda', 'strip_led': {'color': {'r': 255, 'g': 180, 'b': 0}, 'mood': 'duda'}, 'response': BOT_TRY_LATER},
+        ]}
+        runtime, _, tts = self.create(bot=bot)
+        future = runtime.submit_text('question')
+        future.result(timeout=1)
+        self.assertTrue(future.retry_requested)
+        self.assertEqual(tts.spoken, [BOT_ERROR, BOT_TRY_LATER])
+
+    def test_clarification_response_requests_followup_without_error(self):
+        bot = FakeBot()
+        reply = make_reply(REPEAT_QUESTION)
+        bot.respond = lambda text: reply
+        runtime, _, tts = self.create(bot=bot)
+        future = runtime.submit_text('unclear')
+        future.result(timeout=1)
+        self.assertTrue(future.retry_requested)
+        self.assertEqual(tts.spoken, [REPEAT_QUESTION])
+
+    def test_split_clarification_uses_one_recordable_prompt(self):
+        bot = FakeBot()
+        first = make_reply('Perdón, no te escuché bien.')
+        second = make_reply('¿Me lo repites?')
+        bot.respond = lambda text: {'segments': [first, second]}
+        runtime, _, tts = self.create(bot=bot)
+        future = runtime.submit_text('unclear')
+        future.result(timeout=1)
+        self.assertTrue(future.retry_requested)
+        self.assertEqual(tts.spoken, [REPEAT_QUESTION])
+
+    def test_broken_audio_does_not_recursively_speak_an_error(self):
+        tts = FakeTTS()
+        attempts = []
+        def broken_speak(text):
+            attempts.append(text)
+            raise RuntimeError('speaker unavailable')
+        tts.speak = broken_speak
+        runtime, bot, _ = self.create(tts=tts)
+        future = runtime.submit_text('valid question')
+        with self.assertRaises(RuntimeError):
+            future.result(timeout=1)
+        self.assertEqual(attempts, ['valid question'])
+        self.assertFalse(future.retry_requested)
+        self.assertEqual(bot.calls, ['valid question'])
+
+    def test_reported_tts_failure_is_not_a_successful_repeat_prompt(self):
+        from libraries.core.arby_response import EMOTION_COLORS
+        tts = FakeTTS()
+        tts.last_error = 'synthesis failed'
+        runtime = ArbyRuntime(FakeBot(), tts, emotion_colors=EMOTION_COLORS, minimum_display=0).start()
+        self.addCleanup(runtime.close)
+        future = runtime.submit_fixed_phrase(REPEAT_QUESTION, state='duda')
+        with self.assertRaisesRegex(RuntimeError, 'reproducir'):
+            future.result(timeout=1)
+        self.assertEqual(tts.spoken, [REPEAT_QUESTION])
 
     def test_close_cancels_pending_and_prevents_late_speech(self):
         entered, release = threading.Event(), threading.Event()
@@ -179,6 +313,34 @@ class RuntimeTests(unittest.TestCase):
         reply["strip_led"]["mood"] = "alegres"
         with self.assertRaises(ValueError):
             validate_reply(reply)
+
+
+class SupportVisualTests(unittest.TestCase):
+    def test_light_demo_preserves_color_and_cancels_only_its_future(self):
+        from concurrent.futures import Future
+        from libraries.core.arby_ambient import AmbientAction
+        started = threading.Event()
+        runtime = ArbyRuntime(FakeBot(), FakeTTS(), emotion_colors=PALETTE,
+                              minimum_display=0, play_ambient_clip=lambda *args: None)
+        original = runtime._set_visual
+        def visual(state, color, phase):
+            original(state, color, phase)
+            if phase == 'speaking':
+                started.set()
+        runtime._set_visual = visual
+        runtime.start()
+        self.addCleanup(runtime.close)
+        future = runtime.try_submit_ambient(AmbientAction('lights', 'default', duration_seconds=3, color=(255, 0, 0)))
+        self.assertTrue(started.wait(1))
+        self.assertEqual(runtime.visual.color, (255, 0, 0))
+        self.assertFalse(runtime.capture_blocked)
+        self.assertFalse(runtime.cancel_ambient(Future()))
+        self.assertTrue(runtime.cancel_ambient(future))
+        with self.assertRaises(CancelledError):
+            future.result(timeout=1)
+        runtime._queue.join()
+        self.assertEqual(runtime.visual.phase, 'idle')
+
 
 
 class FakePixels(MemoryPixels):

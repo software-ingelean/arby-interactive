@@ -1,0 +1,20 @@
+[Unit]
+Description=Arby interactive companion
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=@PROJECT_DIR@
+ExecStart=@PROJECT_DIR@/.venv/bin/python @PROJECT_DIR@/run_arby.py
+User=root
+Group=arby-support
+UMask=0007
+Environment=ARBY_SUPPORT=true
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=25
+StandardInput=null
+
+[Install]
+WantedBy=multi-user.target
