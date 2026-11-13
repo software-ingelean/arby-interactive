@@ -125,6 +125,7 @@ class SupportTests(unittest.TestCase):
         with closing(connect(self.database)) as db:
             row = db.execute('SELECT * FROM support_commands WHERE id=?', (identifier,)).fetchone()
         self.assertEqual(row['state'], 'error')
+        submit.assert_called_once()
         self.assertEqual(submit.call_args.args[0].kind, 'phrase')
         self.assertIn('ocupado', row['message'])
 

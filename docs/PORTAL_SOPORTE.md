@@ -261,3 +261,30 @@ solo Flask no concede acceso al Bluetooth. Si usas otra cuenta para desarrollo,
 las reglas de `arby-portal` no se aplican a esa cuenta.
 
 Implementación basada en los comandos de [BlueZ bluetoothctl](https://kernel.googlesource.com/pub/scm/bluetooth/bluez.git/+/a93047cd044fb17d687f43bef95289ec834876b2/doc/bluetoothctl.rst).
+
+## Depuración
+
+Con `ARBY_SUPPORT=true`, abre **Depuración** en el menú del portal. Tras
+actualizar el código, reinicia Arby y recarga el navegador. La vista incluye:
+
+- Esquema de entradas → cola → modelo → voz, ojos y luces → espera.
+- Etapa actual y tiempo transcurrido, con ubicación en el código y pila
+  muestreada de los hilos de conversación, captura y reconocimiento.
+- Toques Trill con zona, canal, intensidad y reacción aceptada u omitida;
+  liberaciones del sensor, inicio de voz y finalización del reconocimiento.
+- Cambios de pausa de captura, modo de escucha, pérdidas de bloques de audio,
+  solicitudes recibidas, completadas, interrumpidas y fallidas.
+- Últimos 250 eventos con filtro de texto y pausa de visualización. El historial
+  se reemplaza al reiniciar Arby y no guarda preguntas, respuestas ni audio.
+
+El proceso publica aproximadamente cada segundo; el navegador consulta cada
+3 segundos. Tras 8 segundos sin publicación se indica pérdida de actualizaciones:
+puede significar proceso detenido o bloqueo del bucle principal. La última pila
+recibida es histórica en ese caso. Las etapas de inicialización y consulta al
+modelo se marcan prolongadas tras 60 segundos; reproducción y ejecución general,
+tras 120 segundos. Son indicios para investigar, no un diagnóstico definitivo.
+Esperar solicitudes sin trabajo pendiente es normal y no dispara esa alerta.
+
+La consola conserva respuestas y errores. Los mensajes habituales del pipeline
+de voz pasan al nivel DEBUG de Python; las advertencias de captura y errores de
+reconocimiento permanecen visibles.

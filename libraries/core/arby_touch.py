@@ -193,10 +193,18 @@ class TouchReactions:
         if now < self.next_read:
             return self.detector.active is not None
         self.next_read = now + self.cfg["poll_seconds"]
-        events = self.detector.update(self.reader.read(), now)
+        values = self.reader.read()
+        active_before = self.detector.active
+        events = self.detector.update(values, now)
+        debug = getattr(runtime, "debug", None)
+        if active_before is not None and self.detector.active is None and debug:
+            debug.event("trill", "Sensor liberado", channel=active_before)
         for kind, channel in events:
             self.last_touch = {"zone": kind, "channel": channel, "at": time.time()}
-            if self.pending is not None or runtime.pending_count or now < self.ready_at:
+            blocked = self.pending is not None or runtime.pending_count or now < self.ready_at
+            if debug:
+                debug.event("trill", "Toque detectado", zone=kind, channel=channel, value=round(values[channel], 4), reaction="omitida: ocupado o enfriamiento" if blocked else "respuesta automática")
+            if blocked:
                 continue
             choices = [phrase for phrase in PHRASES[kind] if phrase != self.previous.get(kind)]
             phrase = random.choice(choices or PHRASES[kind])

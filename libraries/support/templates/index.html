@@ -30,6 +30,7 @@
       <p class="nav-label">TU ESPACIO DE CONTROL</p>
       <nav aria-label="Secciones del panel">
         <a href="#overview" data-nav="overview"><span aria-hidden="true">◉</span> Resumen</a>
+        <a href="#debug" data-nav="debug"><span aria-hidden="true">⌘</span> Depuración</a>
         <a href="#visits" data-nav="visits"><span aria-hidden="true">◷</span> Visitas</a>
         <a href="#audio" data-nav="audio"><span aria-hidden="true">♫</span> Audio y dispositivos</a>
         <a href="#experience" data-nav="experience"><span aria-hidden="true">✧</span> Experiencia</a>
@@ -52,6 +53,24 @@
           <article class="panel"><p class="eyebrow">ESCUCHA Y CONTACTO</p><h2>Actividad en tiempo real</h2><div class="meter-row"><label for="overview-meter">Nivel del micrófono</label><meter id="overview-meter" min="0" max="100" value="0">0</meter></div><p id="mic-activity">Micrófono: sin datos</p><p id="touch-activity">Trill: sin toques registrados</p><a class="text-link" href="#audio">Revisar dispositivos ↗</a></article>
           <article class="panel accent-panel"><p class="eyebrow">ANTES DE RECIBIR VISITANTES</p><h2>Una comprobación rápida</h2><p>Escucha un saludo, revisa los ojos y toca los sensores. Un minuto para empezar con tranquilidad.</p><a class="button" href="#tests">Ir a pruebas y demos ↗</a></article>
         </div>
+      </section>
+
+      <section data-view="debug" hidden>
+        <article class="panel">
+          <h2>Qué está haciendo Arby</h2>
+          <p id="debug-health" role="status">Esperando telemetría…</p>
+          <div id="debug-flow" class="debug-flow" aria-label="Flujo de ejecución"></div>
+          <div id="debug-stages" class="cards"></div>
+          <p class="hint">Una operación prolongada es una señal para investigar. La espera de nuevas solicitudes es normal. Las ubicaciones se muestrean; no constituyen una prueba de bloqueo.</p>
+        </article>
+        <article class="panel"><h2>Entradas y salidas</h2><p id="debug-inputs"></p></article>
+        <article class="panel"><h2>Ubicación de los hilos</h2><div id="debug-threads"></div></article>
+        <article class="panel">
+          <div class="section-title"><h2>Registro de eventos</h2><button id="debug-pause" type="button" class="secondary">Pausar registro</button></div>
+          <label>Filtrar eventos<input id="debug-filter" type="search" placeholder="trill, voz, error, canal…"></label>
+          <p class="hint">Últimos 250 eventos de esta ejecución, del más reciente al más antiguo. Actualización cada 3 segundos. Sin preguntas, respuestas ni credenciales.</p>
+          <div id="debug-events" class="debug-events"></div>
+        </article>
       </section>
 
       <section data-view="visits" hidden>

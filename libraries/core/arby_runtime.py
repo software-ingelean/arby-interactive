@@ -48,9 +48,11 @@ class ArbyRuntime:
     """
 
     def __init__(self, bot, tts, *, emotion_colors, queue_size=8, minimum_display=0.5,
-                 play_ambient_clip=None, visit_recorder=None):
+                 play_ambient_clip=None, visit_recorder=None, debug=None):
         if queue_size < 1 or minimum_display < 0:
             raise ValueError("Invalid runtime limits")
+        from libraries.core.arby_debug import DebugTrace
+        self.debug = debug or DebugTrace()
         self.bot, self.tts = bot, tts
         self.emotion_colors = dict(emotion_colors)
         self.minimum_display = minimum_display
@@ -99,6 +101,7 @@ class ArbyRuntime:
         with self._lock:
             if self._closed or self._thread is None or self.pending_count:
                 return None
+            self.debug.event("ambiente", "Acción automática admitida", kind=action.kind)
             request = _Request("ambient", action, Future(), threading.Event())
             self._ambient = request
             self._queue.put_nowait(request)
@@ -120,6 +123,7 @@ class ArbyRuntime:
     def _set_visual(self, state, color, phase):
         with self._lock:
             self._visual = VisualState(self._visual.revision + 1, state, color, phase)
+            self.debug.event("salidas", "Cambio visual", phase=phase, eyes=state, color=color)
 
     def start(self):
         with self._lock:
@@ -145,6 +149,7 @@ class ArbyRuntime:
                 self._queue.put_nowait(_Request(kind, payload, future))
             except Full as exc:
                 raise RuntimeError("La cola está llena; espera a que Arby termine.") from exc
+            self.debug.event("cola", "Solicitud recibida", kind=kind, pending=self.pending_count)
             self._activity_revision += 1
             self.interrupt_ambient()
             return future
@@ -181,6 +186,7 @@ class ArbyRuntime:
         return self._submit("reset", None)
 
     def _speak(self, reply, cancel=None):
+        self.debug.stage("conversacion", "Reproduciendo voz", "arby_runtime.py · _speak → tts.wait", 120)
         started = time.monotonic()
         color = validate_color(reply["strip_led"]["color"])
         self._set_visual(reply["matrix_state"], color, "speaking")
@@ -228,6 +234,7 @@ class ArbyRuntime:
         return None
 
     def _speak_reply(self, reply):
+        self.debug.stage("conversacion", "Preparando y reproduciendo voz", "arby_runtime.py · _speak_reply → tts.wait", 120)
         segments = reply["segments"]
         speak_segments = getattr(self.tts, "speak_segments", None)
         if not callable(speak_segments):
@@ -263,6 +270,7 @@ class ArbyRuntime:
     def _model_reply(self, text):
         """Speak one bounded fallback for query/validation failures, not TTS failures."""
         try:
+            self.debug.stage("conversacion", "Consultando modelo", "arby_runtime.py · _model_reply → bot.respond", 60)
             reply = self.bot.respond(text)
             if self._stop.is_set():
                 raise CancelledError()
@@ -294,6 +302,7 @@ class ArbyRuntime:
 
     def _work(self):
         try:
+            self.debug.stage("conversacion", "Esperando solicitudes", "arby_runtime.py · _work → Queue.get")
             if self.visit_recorder:
                 self.visit_recorder.recover()
             while not self._stop.is_set():
@@ -306,6 +315,8 @@ class ArbyRuntime:
                         continue
                     if self._stop.is_set():
                         raise CancelledError()
+                    self.debug.stage("conversacion", "Ejecutando solicitud", "arby_runtime.py · _work", 120)
+                    self.debug.event("conversacion", "Solicitud iniciada", kind=request.kind)
                     if request.kind == "ambient":
                         reply = self._run_ambient(request)
                     elif request.kind.startswith('visit_'):
@@ -329,10 +340,13 @@ class ArbyRuntime:
                             reply = request.payload
                         self.events.put(("response", reply["response"]))
                         self._speak_reply(reply)
+                    self.debug.event("conversacion", "Solicitud completada", kind=request.kind)
                     request.future.set_result(reply)
                 except CancelledError as exc:
+                    self.debug.event("conversacion", "Solicitud interrumpida", kind=request.kind)
                     request.future.set_exception(exc)
                 except Exception as exc:
+                    self.debug.event("conversacion", "Solicitud fallida", "error", error=type(exc).__name__, kind=request.kind)
                     try:
                         self.tts.stop()
                     except Exception:
@@ -349,6 +363,7 @@ class ArbyRuntime:
                         if request is self._ambient:
                             self._ambient = None
                         self._queue.task_done()
+                        self.debug.stage("conversacion", "Esperando solicitudes", "arby_runtime.py · _work → Queue.get")
         finally:
             if self.visit_recorder:
                 self.visit_recorder.end('shutdown')

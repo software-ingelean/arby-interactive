@@ -15,6 +15,7 @@ No utiliza DeepFilterNet, Vosk ni reducción espectral.
 
 from __future__ import annotations
 
+import logging
 import argparse
 import collections
 from concurrent.futures import Future
@@ -45,7 +46,12 @@ REPEAT_COOLDOWN_SECONDS = 8.0
 
 
 def log(*args):
-    print(*args, file=sys.stderr, flush=True)
+    message = ' '.join(str(arg) for arg in args)
+    logger = logging.getLogger(__name__)
+    if any(marker in message for marker in ('[WARN]', '[ALSA]', 'Error:', 'Error de servicio/red:', 'No se pudo')):
+        logger.warning('%s', message)
+    else:
+        logger.debug('%s', message)
 
 
 def input_layout(sd, device, channel):
@@ -185,7 +191,8 @@ class GoogleWorker(threading.Thread):
         on_conversation_start=None,
         on_conversation_end=None,
     ):
-        super().__init__(daemon=True)
+        super().__init__(daemon=True, name="arby-recognition")
+        self.debug = None
         self.jobs = jobs
         self.stop_event = stop_event
         self.language = language
@@ -219,6 +226,8 @@ class GoogleWorker(threading.Thread):
             try:
                 self._recognize(pcm)
             finally:
+                if self.debug:
+                    self.debug.stage("reconocimiento", "Esperando audio", "arby_google_vad_iir.py · GoogleWorker.run → Queue.get")
                 self.jobs.task_done()
 
     def _resume_followup(self):
@@ -328,6 +337,8 @@ class GoogleWorker(threading.Thread):
         audio = sr.AudioData(pcm, FS_OUT, 2)
         generation = self.generation()
         start = time.perf_counter()
+        if self.debug:
+            self.debug.stage("reconocimiento", "Reconociendo audio con Google", "arby_google_vad_iir.py · _recognize → recognize_google", self.recognizer.operation_timeout + 5)
 
         try:
             text = self.recognizer.recognize_google(
@@ -348,6 +359,8 @@ class GoogleWorker(threading.Thread):
 
         except sr.RequestError as exc:
             elapsed = time.perf_counter() - start
+            if self.debug:
+                self.debug.event("reconocimiento", "Error del servicio de reconocimiento", "error", error=type(exc).__name__)
             log(f"[GOOGLE] Error de servicio/red: {type(exc).__name__} | {elapsed:.2f}s")
             self._request_repeat(generation)
             return

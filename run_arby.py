@@ -177,7 +177,9 @@ def _drain_events(runtime):
             kind, message = runtime.events.get_nowait()
         except Empty:
             return
-        prefix = "Arby" if kind == "response" else "Estado" if kind == "info" else "Error"
+        if kind == "info":
+            continue
+        prefix = "Arby" if kind == "response" else "Error"
         print(f"\n{prefix}: {message}", flush=True)
 
 
@@ -217,11 +219,12 @@ def main():
             }
             event_mode = ambient_settings.mode == "evento"
             ambient = AmbientSequence(ambient_settings, speak=not args.mute)
-            print(f"Estado: modo {ambient_settings.mode}.", flush=True)
+            support.debug.event("inicio", "Modo seleccionado", mode=ambient_settings.mode)
             touch = None
             if args.trill:
                 from libraries.core.arby_touch import TrillReader, TouchReactions, load_touch_config
                 touch_config = load_touch_config()
+                support.checkpoint("Inicializando TrillReader", "run_arby.py · main → TrillReader")
                 sensor = TrillReader(touch_config)
                 stack.callback(sensor.close)
                 touch = TouchReactions(sensor, touch_config)
@@ -234,12 +237,14 @@ def main():
                         stack.callback(signal.signal, sig, previous)
             # GPIO initialization comes before MatrixOutput can drop privileges.
             pixels = None if args.strip else MemoryPixels(args.strip_leds)
+            support.checkpoint("Inicializando LedStripController", "run_arby.py · main → LedStripController")
             strip = LedStripController(strip_config, pixels=pixels)
             stack.callback(close_strip_and_recover_audio, strip,
                            recover=args.strip and args.audio_recover_on_exit)
             matrix = preview = None
             if args.eyes == "matrix":
                 from libraries.eyes.matrix_output import MatrixOutput
+                support.checkpoint("Inicializando MatrixOutput", "run_arby.py · main → MatrixOutput")
                 matrix = MatrixOutput(multiplexing=args.multiplexing,
                     row_address_type=args.row_address_type, slowdown=args.slowdown,
                     brightness=args.matrix_brightness, swap_eyes=args.swap_eyes,
@@ -257,6 +262,7 @@ def main():
                 if not (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")):
                     raise ValueError("Configura GEMINI_API_KEY antes de ejecutar.")
                 from libraries.bot.arby_bot import ArbyBot, BotConfig, EMOTION_COLORS
+                support.checkpoint("Inicializando ArbyBot", "run_arby.py · main → ArbyBot")
                 bot = ArbyBot(config=BotConfig(
                     model=args.model or BotConfig().model,
                     timeout_seconds=args.bot_timeout,
@@ -270,17 +276,16 @@ def main():
                 clients.callback(bot.close)
                 if args.mute:
                     tts = MutedTTS()
-                    print("Estado: voz desactivada (ARBY_MUTE=true).", flush=True)
+                    support.debug.event("inicio", "Voz desactivada")
                 else:
                     from libraries.audio.arby_tts import ArbyTTS, TTSConfig
                     overrides = {name: value for name, value in {
                         "voice": args.voice, "rate": args.rate, "pitch": args.pitch,
                         "ffplay_path": args.ffplay, "audio_driver": args.audio_driver,
                         "audio_device": args.audio_device}.items() if value is not None}
+                    support.checkpoint("Inicializando ArbyTTS", "run_arby.py · main → ArbyTTS")
                     tts = ArbyTTS(TTSConfig(**overrides))
-                    print(f"Estado: voz activa / driver={args.audio_driver or os.getenv('SDL_AUDIODRIVER') or 'default'}"
-                          f" / device={args.audio_device or os.getenv('AUDIODEV') or 'default'}"
-                          " / salida estéreo 48000 Hz", flush=True)
+                    support.debug.event("inicio", "Voz inicializada", driver=args.audio_driver or "default")
                 clients.callback(tts.close)
                 ambient_audio = None
                 if event_mode and not args.mute:
@@ -291,7 +296,7 @@ def main():
                     )
                 from libraries.core.arby_visits import VisitRecorder
                 runtime = ArbyRuntime(
-                    bot, tts, emotion_colors=palette,
+                    bot, tts, emotion_colors=palette, debug=support.debug,
                     visit_recorder=VisitRecorder(support.database) if event_mode and args.input_mode == "voice" and not args.demo else None,
                     play_ambient_clip=ambient_audio.play if ambient_audio else None,
                 ).start()
@@ -299,7 +304,7 @@ def main():
             stack.callback(runtime.close)
             eyes = EyeAnimator()
             if touch:
-                print("Estado: Trill activo junto a la conversación; toques con respuestas automáticas.", flush=True)
+                support.debug.event("inicio", "Trill activo con respuestas automáticas")
             microphone = None
             if args.input_mode == "voice":
                 from libraries.voice_input.arby_microphone import MicrophoneInput
@@ -310,6 +315,7 @@ def main():
                 reader = threading.Thread(target=_console, args=(runtime, stop, input_done),
                                           name="arby-console", daemon=True)
                 reader.start()
+            support.debug.stage('proceso', 'Atendiendo sensores y actualizando salidas', 'run_arby.py · main → bucle de renderizado')
             support.snapshot['state'] = 'ready'
             for name in ('trill', 'microphone', 'eyes', 'strip'):
                 component = support.snapshot['components'][name]

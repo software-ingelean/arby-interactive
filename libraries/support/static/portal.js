@@ -2,6 +2,7 @@
 
 const $ = id => document.getElementById(id);
 const views = {
+  debug: ["Depuración de Arby", "Flujo, sensores y registro de ejecución en tiempo real."],
   visits: ['Visitas de Arby', 'Conversaciones iniciadas durante los eventos.'],
   overview: ['¿Cómo está Arby?', 'Todo lo esencial, de un vistazo.'],
   audio: ['Escuchar y hacerse escuchar.', 'Elige los dispositivos que Arby debe recordar.'],
@@ -275,6 +276,7 @@ async function refresh() {
     $('updated').textContent = runtime.fresh ? 'Estado actualizado' : 'Estado sin actualizar';
     renderComponents(runtime, okay);
     renderActivity(runtime, okay);
+    renderDebug(runtime);
     if (!filled && !dirty) fill(data);
     updateVisibility(runtime);
     renderDemos(data.tests || []);
@@ -289,7 +291,7 @@ async function refresh() {
     $('connection').textContent = 'Sin conexión';
     $('summary').textContent = powerMessage || 'No se pudo consultar Arby. Intentando reconectar…';
     $('summary').classList.add('error');
-    if (latest) { latest.runtime.fresh = false; renderComponents(latest.runtime, false); renderActivity(latest.runtime, false); }
+    if (latest) { latest.runtime.fresh = false; renderDebug(latest.runtime); renderComponents(latest.runtime, false); renderActivity(latest.runtime, false); }
     updateTestButtons();
   } finally { refreshing = false; }
 }
@@ -544,3 +546,60 @@ for (const [id, scan] of [['refresh-bluetooth', false], ['scan-bluetooth', true]
     result.authenticated ? await showPortal() : showLogin();
   } catch (error) { showLogin(); notice('No se pudo abrir el portal. Recarga la página.', true); }
 })();
+
+
+let debugPaused = false, debugEvents = [];
+function debugNode(tag, text, className) {
+  const node = document.createElement(tag);
+  node.textContent = text;
+  if (className) node.className = className;
+  return node;
+}
+function renderDebug(runtime) {
+  const debug = runtime.debug;
+  const stale = !runtime.fresh;
+  const slow = Object.values(debug?.stages || {}).some(stage => stage.slow);
+  $('debug-health').textContent = !debug ? 'Sin telemetría de depuración. Activa ARBY_SUPPORT y reinicia Arby.' :
+    stale ? `Sin actualizaciones: posible detención o bloqueo. Último dato: ${new Date(runtime.updated_at * 1000).toLocaleString()}.` :
+    runtime.state !== 'ready' ? `Estado del proceso: ${runtime.state}` :
+    slow ? 'Operación prolongada: revisa la etapa y el hilo correspondiente.' :
+    runtime.busy ? 'Arby está ejecutando una solicitud.' : 'Arby está esperando actividad.';
+  const stages = $('debug-stages'); stages.replaceChildren();
+  for (const [source, stage] of Object.entries(debug?.stages || {})) {
+    const card = debugNode('article', '', 'debug-stage');
+    card.append(debugNode('strong', `${source}: ${stage.name}`),
+      debugNode('p', `${stage.elapsed} s${stage.slow ? ' · operación prolongada' : ''}${stale ? ' · último dato recibido' : ''}`),
+      debugNode('code', stage.location));
+    stages.append(card);
+  }
+  const flow = $('debug-flow'); flow.replaceChildren();
+  const phase = runtime.phase || 'idle';
+  for (const [key, title] of [['input', 'Sensores / voz / consola'], ['queue', 'Cola'], ['loading', 'Modelo'], ['speaking', 'Voz + ojos + luces'], ['idle', 'Espera']]) {
+    const active = !stale && runtime.state === 'ready' && (key === phase || key === 'queue' && runtime.busy || key === 'input' && runtime.microphone_activity);
+    flow.append(debugNode('span', title, active ? 'debug-step active' : 'debug-step'));
+  }
+  $('debug-inputs').textContent = `Pendientes: ${runtime.debug?.pending ?? '—'} · Captura de voz: ${runtime.capture_blocked ? 'pausada por una solicitud o reproducción' : 'sin pausa del runtime'} · Actividad de micrófono: ${runtime.microphone_activity ? 'sí' : 'no'} · Nivel: ${Number(runtime.microphone_level || 0).toFixed(4)} · Último toque: ${runtime.last_touch ? `${runtime.last_touch.zone}, canal ${runtime.last_touch.channel}, ${new Date(runtime.last_touch.at * 1000).toLocaleTimeString()}` : 'ninguno registrado'}${stale ? ' · Datos sin actualizar' : ''}`;
+  const threads = $('debug-threads'); threads.replaceChildren();
+  for (const thread of debug?.threads || []) {
+    threads.append(debugNode('h3', thread.name), debugNode('pre', thread.stack.join('\n')));
+  }
+  if (!debugPaused) debugEvents = debug?.events || [];
+  renderDebugEvents();
+}
+function renderDebugEvents() {
+  const query = $('debug-filter').value.toLocaleLowerCase();
+  const list = $('debug-events'); list.replaceChildren();
+  for (const event of [...debugEvents].reverse()) {
+    const detail = JSON.stringify(event.details);
+    const text = `${new Date(event.at * 1000).toLocaleTimeString()} · ${event.level} · ${event.source} · ${event.message} · ${detail}`;
+    if (!text.toLocaleLowerCase().includes(query)) continue;
+    list.append(debugNode('pre', text, event.level === 'error' ? 'debug-error' : ''));
+  }
+  if (!list.children.length) list.append(debugNode('p', 'Sin eventos para mostrar.'));
+}
+$('debug-filter').addEventListener('input', renderDebugEvents);
+$('debug-pause').addEventListener('click', () => {
+  debugPaused = !debugPaused;
+  $('debug-pause').textContent = debugPaused ? 'Reanudar registro' : 'Pausar registro';
+  if (latest) renderDebug(latest.runtime);
+});

@@ -18,10 +18,20 @@ class MicrophoneInput:
         self.pipeline = ArbyPipeline(config, on_question=self.submit,
                                      on_unrecognized=self.request_repetition,
                                      is_paused=self.is_paused,
-                                     on_voice_start=runtime.interrupt_ambient,
+                                     on_voice_start=self.voice_started,
                                      on_conversation_start=(lambda: runtime.visit_event('start')) if self.track_visits else None,
                                      on_conversation_end=(lambda: runtime.visit_event('end')) if self.track_visits else None)
+        self.pipeline.google_worker.debug = getattr(runtime, "debug", None)
         self.thread = threading.Thread(target=self.run, name="arby-microphone", daemon=True)
+
+    def trace(self, message, **details):
+        debug = getattr(self.runtime, 'debug', None)
+        if debug:
+            debug.event('microfono', message, **details)
+
+    def voice_started(self):
+        self.trace('Inicio de voz detectado')
+        self.runtime.interrupt_ambient()
 
     def is_paused(self):
         if self.runtime.capture_blocked:
@@ -37,11 +47,12 @@ class MicrophoneInput:
         # The pipeline already excludes playback before delivering recognized text.
         # A queued visit-start reset must not discard its accompanying question.
         if self.track_visits or not self.is_paused():
-            self.runtime.events.put(("info", f"Tú: {text}"))
+            self.trace("Reconocimiento completado", characters=len(text))
             return (self.runtime.submit_voice_text(text) if self.track_visits
                     else self.runtime.submit_text(text))
 
     def request_repetition(self):
+        self.trace("Voz no reconocida; solicitando repetición")
         if not self.is_paused():
             return self.runtime.submit_fixed_phrase(
                 REPEAT_QUESTION, state="duda",
@@ -57,6 +68,7 @@ class MicrophoneInput:
             self.pipeline.run()
         except Exception as exc:
             self.error = exc
+            self.trace("Entrada de audio fallida", error=type(exc).__name__)
             self.runtime.events.put(("error", f"Micrófono: {type(exc).__name__}: {exc}"))
             self.stop.set()
         finally:

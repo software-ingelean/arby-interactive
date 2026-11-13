@@ -164,6 +164,10 @@ def enqueue(kind, database=DEFAULT_DATABASE):
 class SupportBridge:
     """Called from the render thread; bounded database waits and no hardware ownership."""
     def __init__(self, database=DEFAULT_DATABASE):
+        from libraries.core.arby_debug import DebugTrace
+        self.debug = DebugTrace()
+        self.debug.stage("proceso", "Iniciando Arby", "run_arby.py · main", 60)
+        self._debug_observed = {}
         self.database = database
         self.next_poll = 0
         self.pending = None
@@ -181,11 +185,22 @@ class SupportBridge:
         if not self.enabled:
             return
         self.snapshot['pid'] = os.getpid()
+        self.snapshot['debug'] = self.debug.snapshot()
+        self.snapshot['debug']['pending'] = self.snapshot.get('pending', 0)
+        self.snapshot['updated_at'] = time.time()
         with closing(connect(self.database)) as db, db:
             db.execute('INSERT OR REPLACE INTO support_runtime VALUES(1,?,?)',
                        (time.time(), json.dumps(self.snapshot)))
 
+    def checkpoint(self, name, location, expected_seconds=60):
+        self.debug.stage('proceso', name, location, expected_seconds)
+        try:
+            self.publish()
+        except (OSError, sqlite3.Error):
+            pass
+
     def finish(self, state):
+        self.debug.stage('proceso', 'Arby finalizado: ' + state, 'run_arby.py · main')
         self.snapshot['state'] = state
         try:
             self.publish()
@@ -209,13 +224,6 @@ class SupportBridge:
                 db.execute("UPDATE support_commands SET state='error',message='La solicitud caducó o Arby se reinició.' WHERE state IN ('pending','running') AND created<?",
                            (time.time() - 30,))
                 row = db.execute("SELECT * FROM support_commands WHERE state='pending' ORDER BY created LIMIT 1").fetchone()
-                if row and self.pending is None:
-                    from libraries.core.arby_ambient import AmbientAction
-                    component = 'speaker' if row['kind'] == 'speaker' else 'eyes'
-                    enabled = self.snapshot['components'].get(component, {}).get('state') != 'disabled'
-                    action = (AmbientAction('phrase', 'alegres', SOUND_TEST)
-                              if row['kind'] == 'speaker' else AmbientAction('eyes', 'guiño ojo', duration_seconds=2))
-                    future = submit(action) if enabled else None
                 row = db.execute("SELECT * FROM support_commands WHERE state='pending' ORDER BY CASE WHEN kind='cancel' THEN 0 ELSE 1 END, created LIMIT 1").fetchone()
                 if row and row['kind'] == 'cancel':
                     stopped = self.pending is not None and runtime.cancel_ambient(self.pending[1])
@@ -233,6 +241,7 @@ class SupportBridge:
                         self.pending = row['id'], future, row['kind']
             if getattr(runtime, 'visit_recorder', None):
                 self.snapshot['visits'] = runtime.visit_recorder.status
+            self.snapshot['pending'] = runtime.pending_count
             self.snapshot['busy'] = runtime.pending_count > 0
             self.snapshot['phase'] = runtime.visual.phase
             if microphone:
@@ -246,6 +255,19 @@ class SupportBridge:
             elif self.snapshot['components'].get('speaker', {}).get('state') != 'disabled':
                 checked = getattr(tts, 'last_status', '') == 'completed'
                 self.snapshot['components']['speaker'] = {'state': 'ready' if checked else 'unknown', 'detail': 'Reproducción completada; confirma que se escucha.' if checked else 'Voz inicializada. Usa Probar sonido para comprobar la salida.'}
+            observed = {'microphone_activity': self.snapshot.get('microphone_activity'),
+                        'capture_blocked': getattr(runtime, 'capture_blocked', runtime.pending_count > 0),
+                        'pending': runtime.pending_count}
+            if microphone:
+                pipeline = microphone.pipeline
+                observed.update(listen_mode=getattr(getattr(pipeline, 'google_worker', None), 'mode', 'unknown'),
+                                dropped_capture=getattr(pipeline, 'drop_capture', 0),
+                                dropped_recognition=getattr(pipeline, 'drop_google', 0))
+            for key, value in observed.items():
+                if self._debug_observed.get(key) != value:
+                    self.debug.event('entrada', 'Cambio de actividad', field=key, value=value)
+            self._debug_observed = observed
+            self.snapshot['capture_blocked'] = getattr(runtime, 'capture_blocked', runtime.pending_count > 0)
             self.publish()
         except (OSError, sqlite3.Error):
             # Support must never take down the conversation or steal its event queue.

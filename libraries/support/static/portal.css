@@ -201,3 +201,14 @@ footer { display: flex; justify-content: space-between; gap: 15px; color: #8a958
 .visits-scroll { overflow-x: auto; }
 .visits-table { width: 100%; border-collapse: collapse; text-align: left; }
 .visits-table th, .visits-table td { padding: .75rem; border-bottom: 1px solid #ddd; white-space: nowrap; }
+
+.debug-flow { display:flex; flex-wrap:wrap; gap:12px; margin:20px 0; }
+.debug-step { padding:12px; border:1px solid #b8c7bd; border-radius:10px; }
+.debug-step:not(:last-child)::after { content:' →'; }
+.debug-step.active { background:#d5f5e0; border:2px solid #287a4b; font-weight:700; color:#153d26; }
+.debug-stage { padding:16px; border:1px solid #b8c7bd; border-radius:12px; min-width:0; }
+.debug-stage code, #debug-threads pre, .debug-events pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+.debug-events { max-height:550px; overflow:auto; margin-top:16px; font-size:12px; }
+.debug-events pre { padding:10px; margin:0; border-bottom:1px solid #d8e1db; }
+.debug-error { color:#a12d22; }
+#view-debug > .panel { margin-bottom:20px; }
