@@ -247,6 +247,12 @@ navegador, al reinicio de los servicios y al apagado de la Raspberry. **Aplicar 
 reiniciar Arby** carga esos ajustes en la ejecución actual. No elimines esta base
 de datos al actualizar el proyecto; portal y Arby deben usar el mismo checkout.
 
+En **Experiencia → Comportamiento**, desmarca **Activar lectura de sensores Trill**
+para detener la lectura y las reacciones táctiles. Pulsa **Guardar ajustes** y luego
+**Aplicar y reiniciar Arby**. Con la opción desactivada no se inicializa el lector
+Trill. La preferencia se conserva tras apagar el equipo y prevalece sobre
+`ARBY_TRILL` de `.env`. Para reactivar los sensores, marca la opción, guarda y aplica.
+
 En **Experiencia → Comportamiento**, **Activar frases periódicas** permite
 habilitar o deshabilitar las frases en ambos modos. Los campos mínimo y máximo
 controlan el tiempo de espera aleatorio, en segundos, desde que Arby queda libre

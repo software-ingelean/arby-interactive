@@ -205,6 +205,27 @@ class SupportTests(unittest.TestCase):
         initialize(self.database)
         self.assertEqual(load_ambient_settings(self.database).gesture_range, (10, 20))
 
+    def test_trill_can_be_disabled_persistently_from_portal(self):
+        self.login()
+        payload = settings(self.database)
+        payload['controls']['trill'] = False
+        response = self.request('/api/settings', payload, method='PUT')
+        self.assertEqual(response.status_code, 200)
+        initialize(self.database)
+        saved = settings(self.database)
+        self.assertIs(saved['controls']['trill'], False)
+        with patch.dict(os.environ, {'ARBY_TRILL': 'true'}, clear=True), patch.object(run_arby, 'load_overrides', return_value=saved['controls']):
+            self.assertFalse(run_arby.load_config().trill)
+        payload['controls']['trill'] = True
+        save_settings(payload, self.database)
+        with patch.dict(os.environ, {'ARBY_TRILL': 'false'}, clear=True), patch.object(run_arby, 'load_overrides', return_value=settings(self.database)['controls']):
+            self.assertTrue(run_arby.load_config().trill)
+
+    def test_trill_control_rejects_non_boolean_values(self):
+        for value in ('false', 0, None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                validate_controls({'trill': value})
+
     def test_overrides_win_over_environment(self):
         with patch.dict(os.environ, {'ARBY_MIC_GAIN_DB': 'invalid', 'ARBY_MUTE': 'false'}, clear=True), patch.object(run_arby, 'load_overrides', return_value={'mic_gain_db': 9, 'mute': True}):
             config = run_arby.load_config()

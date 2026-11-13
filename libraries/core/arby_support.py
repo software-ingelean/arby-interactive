@@ -20,6 +20,7 @@ from libraries.core.arby_ambient import (
 # Explicit allowlist: hardware wiring and provider credentials stay in .env.
 CONTROLS = {
     'mute': (bool, None, None),
+    'trill': (bool, None, None),
     'rate': (str, None, None),
     'mic_gain_db': (float, -30, 36),
     'mic_channel': (str, None, None),

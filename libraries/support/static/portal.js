@@ -169,6 +169,7 @@ function fill(data) {
   $('invitation-min').value = ambient.invitation_min_seconds;
   $('invitation-max').value = ambient.invitation_max_seconds;
   $('voice-on').checked = !controls.mute;
+  $('trill-enabled').checked = Boolean(controls.trill);
   $('rate').value = parseInt(controls.rate, 10);
   $('gain').value = controls.mic_gain_db;
   $('mic-channel').value = controls.mic_channel || 'left';
@@ -214,7 +215,7 @@ function renderComponents(runtime, okay) {
 function renderActivity(runtime, okay) {
   const mic = okay && runtime.capabilities?.microphone ?
     `Micrófono: ${runtime.microphone_activity ? 'detectando actividad o procesando' : 'en espera'}` : 'Micrófono: sin actividad confirmada';
-  const touch = okay && runtime.last_touch ?
+  const touch = okay && runtime.components?.trill?.state === 'disabled' ? 'Lectura de sensores Trill desactivada.' : okay && runtime.last_touch ?
     `Último toque: ${runtime.last_touch.zone} · canal ${runtime.last_touch.channel} · ${new Date(runtime.last_touch.at * 1000).toLocaleTimeString()}` :
     'Sin toques recientes confirmados.';
   for (const id of ['mic-activity', 'audio-mic-activity', 'test-mic-activity']) $(id).textContent = mic;
@@ -442,7 +443,7 @@ $('settings-form').addEventListener('submit', event => {
     const payload = {
       ambient: {mode: $('mode').value, phrases_enabled: $('phrases-enabled').checked, gesture_min_seconds: value('gesture-min'), gesture_max_seconds: value('gesture-max'),
         invitation_min_seconds: value('invitation-min'), invitation_max_seconds: value('invitation-max')},
-      controls: {mute: !$('voice-on').checked, rate: `${rate >= 0 ? '+' : ''}${rate}%`, mic_gain_db: value('gain'),
+      controls: {trill: $('trill-enabled').checked, mute: !$('voice-on').checked, rate: `${rate >= 0 ? '+' : ''}${rate}%`, mic_gain_db: value('gain'),
         mic_channel: $('mic-channel').value, matrix_brightness: value('matrix-brightness'), strip_brightness: value('strip-brightness')},
       audio: audioDraft,
     };

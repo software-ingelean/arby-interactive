@@ -178,7 +178,8 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
         for command in commands:
             if command['state'] in ('pending', 'running') and time.time() - command['created'] > 30:
                 command.update(state='error', message='Prueba caducada. Comprueba que Arby siga funcionando.')
-        defaults = {'mute': os.getenv('ARBY_MUTE', '').lower() in ('1', 'true', 'yes', 'on'),
+        defaults = {'trill': os.getenv('ARBY_TRILL', '').lower() in ('1', 'true', 'yes', 'on'),
+                    'mute': os.getenv('ARBY_MUTE', '').lower() in ('1', 'true', 'yes', 'on'),
                     'rate': os.getenv('ARBY_RATE') or '+12%',
                     'mic_gain_db': os.getenv('ARBY_MIC_GAIN_DB') or 6,
                     'mic_channel': os.getenv('ARBY_MIC_CHANNEL') or 'left',
