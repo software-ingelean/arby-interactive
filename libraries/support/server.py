@@ -33,6 +33,8 @@ def system_action(action, **values):
     except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
         raise ValueError('Acción no disponible. Revisa la instalación y la conexión por SSH.') from exc
     messages = {
+        'bluetooth_missing': 'Bluetooth no está instalado. Instala BlueZ en la Raspberry y actualiza el helper por SSH.',
+        'bluetooth_scan_failed': 'No se pudo consultar o buscar dispositivos Bluetooth. Revisa el servicio bluetooth por SSH y vuelve a intentar.',
         'bluetooth_timeout': 'Bluetooth tardó demasiado. Acerca el dispositivo, activa el modo de emparejamiento y vuelve a intentar.',
         'bluetooth_unavailable': 'El adaptador Bluetooth no está disponible o no está encendido.',
         'bluetooth_not_found': 'El dispositivo ya no está disponible. Activa su modo de emparejamiento y pulsa Buscar dispositivos.',

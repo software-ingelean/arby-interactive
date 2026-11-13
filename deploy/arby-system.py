@@ -38,7 +38,10 @@ class BluetoothFailure(ValueError):
 
 def bluetooth(command, *args, seconds=4):
     try:
-        result = run(['/usr/bin/bluetoothctl', '--timeout', str(seconds), command, *args], timeout=seconds + 2)
+        # --timeout keeps BlueZ alive even after a command succeeds.
+        # Discovery needs this window; other commands exit on completion.
+        options = ['--timeout', str(seconds)] if command == 'scan' else []
+        result = run(['/usr/bin/bluetoothctl', *options, command, *args], timeout=seconds + 2)
     except subprocess.CalledProcessError as exc:
         raise BluetoothFailure((exc.stdout or '') + '\n' + (exc.stderr or '')) from exc
     if any(error in result.stdout for error in ('Failed', 'not available', 'No default controller')):
@@ -84,6 +87,25 @@ def bluetooth_status():
 
 
 def execute(data):
+    try:
+        return execute_action(data)
+    except subprocess.TimeoutExpired:
+        if data.get('action') in ('bluetooth', 'bluetooth_scan'):
+            return {'error_code': 'bluetooth_timeout'}
+        raise
+    except BluetoothFailure as exc:
+        if data.get('action') in ('bluetooth', 'bluetooth_scan'):
+            detail = str(exc).lower()
+            unavailable = any(value in detail for value in ('no default controller', 'notready', 'blocked'))
+            return {'error_code': 'bluetooth_unavailable' if unavailable else 'bluetooth_scan_failed'}
+        raise
+    except FileNotFoundError:
+        if data.get('action') in ('bluetooth', 'bluetooth_scan', 'bluetooth_connect', 'bluetooth_disconnect'):
+            return {'error_code': 'bluetooth_missing'}
+        raise
+
+
+def execute_action(data):
     action = data.get('action')
     if action == 'arby':
         run(['/usr/bin/systemctl', '--no-block', 'restart', 'arby.service'])
@@ -132,7 +154,7 @@ def execute(data):
             if info.get('Paired') != 'yes':
                 stage = 'pair'
                 try:
-                    result = run(['/usr/bin/bluetoothctl', '--agent', 'NoInputNoOutput', '--timeout', '15', 'pair', address], timeout=17)
+                    result = run(['/usr/bin/bluetoothctl', '--agent', 'NoInputNoOutput', 'pair', address], timeout=17)
                 except subprocess.CalledProcessError as exc:
                     raise BluetoothFailure((exc.stdout or '') + '\n' + (exc.stderr or '')) from exc
                 if 'Pairing successful' not in result.stdout:

@@ -331,6 +331,26 @@ class HelperTests(unittest.TestCase):
                 self.helper.execute(payload)
             run.assert_not_called()
 
+    def test_bluetooth_timeout_option_only_for_discovery(self):
+        for command, args in [('show', ()), ('power', ('on',)), ('info', ('AA:BB:CC:DD:EE:FF',)), ('scan', ('on',))]:
+            with self.subTest(command=command), patch.object(self.helper, 'run', return_value=SimpleNamespace(stdout='')) as run:
+                self.helper.bluetooth(command, *args, seconds=8)
+                argv = run.call_args.args[0]
+                self.assertEqual('--timeout' in argv, command == 'scan')
+                self.assertEqual(run.call_args.kwargs['timeout'], 10)
+
+    def test_bluetooth_scan_failures_are_safe_and_specific(self):
+        import subprocess
+        for failure, code in [
+            (self.helper.BluetoothFailure('No default controller available PRIVATE'), 'bluetooth_unavailable'),
+            (self.helper.BluetoothFailure('Failed to start discovery PRIVATE'), 'bluetooth_scan_failed'),
+            (subprocess.TimeoutExpired(['bluetoothctl'], 6), 'bluetooth_timeout'),
+            (FileNotFoundError('PRIVATE'), 'bluetooth_missing'),
+        ]:
+            for action in ('bluetooth', 'bluetooth_scan'):
+                with self.subTest(action=action, code=code), patch.object(self.helper, 'bluetooth', side_effect=failure):
+                    self.assertEqual(self.helper.execute({'action': action}), {'error_code': code})
+
     def test_bluetooth_scan_includes_classic_and_general_discovery(self):
         with patch.object(self.helper, 'bluetooth') as command, patch.object(self.helper, 'bluetooth_status', return_value={'devices': []}):
             self.helper.execute({'action': 'bluetooth_scan'})
@@ -362,6 +382,7 @@ class HelperTests(unittest.TestCase):
             result = self.helper.execute({'action': 'bluetooth_connect', 'address': 'AA:BB:CC:DD:EE:FF'})
         self.assertTrue(result['ok'])
         self.assertIn('NoInputNoOutput', run.call_args.args[0])
+        self.assertNotIn('--timeout', run.call_args.args[0])
 
     def test_bluetooth_does_not_report_success_if_disconnected(self):
         with patch.object(self.helper, 'bluetooth', side_effect=['', 'Paired: yes', '', '', 'Connected: no']):

@@ -267,6 +267,22 @@ Reinicia el portal (o vuelve a ejecutar el comando de desarrollo) y abre la secc
 solo Flask no concede acceso al Bluetooth. Si usas otra cuenta para desarrollo,
 las reglas de `arby-portal` no se aplican a esa cuenta.
 
+Si el portal muestra «Acción no disponible», comprueba desde el checkout en la
+Raspberry que el helper instalado y sus permisos corresponden a esta versión:
+
+```bash
+sudo systemctl status bluetooth --no-pager
+sudo -u arby-portal sudo -n /usr/bin/python3 -I /usr/local/libexec/arby-system.py <<<'{"action":"bluetooth"}'
+sudo -u arby-portal sudo -n /usr/bin/python3 -I /usr/local/libexec/arby-system.py <<<'{"action":"bluetooth_scan"}'
+```
+
+Las dos últimas órdenes deben devolver JSON. Si sudo rechaza la ejecución, revisa
+`deploy/arby-portal.sudoers`. Si falta el helper, reinstálalo con el comando anterior.
+Esta versión reserva `bluetoothctl --timeout` para el escaneo: usarlo también en
+las consultas y conexiones fuerza esperas completas y puede agotar el plazo HTTP.
+Después de actualizar el helper y el código, ejecuta
+`sudo systemctl restart arby-portal.service`.
+
 Implementación basada en los comandos de [BlueZ bluetoothctl](https://kernel.googlesource.com/pub/scm/bluetooth/bluez.git/+/a93047cd044fb17d687f43bef95289ec834876b2/doc/bluetoothctl.rst).
 
 ## Depuración
