@@ -41,6 +41,7 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
     initialize_visits(database)
     app = Flask(__name__)
     app.config.update(SECRET_KEY=secrets.token_hex(32), MAX_CONTENT_LENGTH=8192,
+                      SESSION_COOKIE_NAME='arby_portal_session',
                       SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Strict',
                       PERMANENT_SESSION_LIFETIME=timedelta(hours=4))
     password_hash = password_hash or os.getenv('ARBY_PORTAL_PASSWORD_HASH')
@@ -59,7 +60,7 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
         if request.path.startswith('/api/'):
             if request.method != 'GET':
                 if not session.get('csrf') or not hmac.compare_digest(request.headers.get('X-CSRF-Token', ''), session['csrf']):
-                    return jsonify(error='Sesión caducada. Recarga la página.'), 403
+                    return jsonify(error='No se pudo validar la sesión. Intenta de nuevo.', code='csrf_mismatch'), 403
             if request.path not in ('/api/session', '/api/login') and not session.get('authenticated'):
                 return jsonify(error='Introduce la clave de soporte.'), 401
 

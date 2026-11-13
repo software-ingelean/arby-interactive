@@ -66,7 +66,7 @@ function notice(message, error = false) {
   noticeTimer = setTimeout(() => $('notice').hidden = true, 10000);
 }
 
-async function api(url, method = 'GET', data) {
+async function api(url, method = 'GET', data, retried = false) {
   const response = await fetch(url, {
     method,
     headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
@@ -76,10 +76,14 @@ async function api(url, method = 'GET', data) {
   const payload = await response.json().catch(() => ({error: 'Respuesta inesperada. Recarga la página.'}));
   if (!response.ok) {
     if (response.status === 401 && url !== '/api/login') showLogin();
-    if (response.status === 403) {
-      const info = await fetch('/api/session').then(result => result.json());
+    if (!retried && response.status === 403 && payload.code === 'csrf_mismatch') {
+      const info = await api('/api/session');
       csrf = info.csrf;
-      if (!info.authenticated) showLogin();
+      if (info.authenticated || url === '/api/login') {
+        return api(url, method, data, true);
+      }
+      showLogin();
+      throw new Error('Introduce la clave de soporte para continuar.');
     }
     throw new Error(payload.error || 'No se pudo completar la acción.');
   }

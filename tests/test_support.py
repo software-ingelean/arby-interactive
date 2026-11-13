@@ -61,6 +61,25 @@ class SupportTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/restart', json={'target': 'arby'}).status_code, 403)
         self.system.assert_not_called()
 
+    def test_stale_csrf_can_recover_without_repeating_system_action(self):
+        self.login()
+        response = self.client.post('/api/network/connect', json={'ssid': 'Fair', 'password': 'secret'},
+                                    headers={'X-CSRF-Token': 'stale-token'})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json['code'], 'csrf_mismatch')
+        self.system.assert_not_called()
+        info = self.client.get('/api/session').json
+        self.assertTrue(info['authenticated'])
+        self.csrf = info['csrf']
+        self.assertEqual(self.request('/api/network/connect', {'ssid': 'Fair', 'password': 'secret'}).status_code, 200)
+        self.system.assert_called_once_with('wifi', ssid='Fair', password='secret')
+
+    def test_portal_cookie_does_not_collide_with_generic_session_cookie(self):
+        self.client.set_cookie('session', 'another-application')
+        self.login()
+        self.client.set_cookie('session', 'changed-by-another-application')
+        self.assertEqual(self.client.get('/api/status').status_code, 200)
+
     def test_login_throttle_and_logout(self):
         for _ in range(5):
             self.assertEqual(self.request('/api/login', {'password': 'wrong'}).status_code, 401)
