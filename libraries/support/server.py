@@ -43,6 +43,7 @@ def system_action(action, **values):
         'bluetooth_connect_failed': 'No se pudo conectar. Comprueba que el dispositivo esté cerca y desconectado de otros equipos.',
         'bluetooth_disconnect_failed': 'No se pudo desconectar el dispositivo. Actualiza su estado y vuelve a intentar.',
         'bluetooth_audio_unavailable': 'El dispositivo se detectó, pero el sistema no tiene disponible su perfil de audio Bluetooth.',
+        'wifi_profile_missing': 'La configuración guardada de esa red ya no está disponible. Pulsa Buscar redes y vuelve a seleccionarla.',
         'wifi_timeout': 'La conexión tardó demasiado. Comprueba la señal e intenta de nuevo.',
         'wifi_not_found': 'La red ya no está disponible. Pulsa Buscar redes y vuelve a seleccionarla.',
         'wifi_credentials': 'No se pudieron validar las credenciales. Revisa la contraseña y el tipo de seguridad de la red.',
@@ -218,7 +219,12 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
     @app.post('/api/network/connect')
     def network_connect():
         data = body()
-        return jsonify(system('wifi', ssid=data.get('ssid'), password=data.get('password', '')))
+        values = {'ssid': data.get('ssid'), 'password': data.get('password', '')}
+        if 'use_saved' in data:
+            if type(data['use_saved']) is not bool:
+                raise ValueError('La opción de red guardada debe ser booleana.')
+            values['use_saved'] = data['use_saved']
+        return jsonify(system('wifi', **values))
 
     @app.get('/api/bluetooth')
     def bluetooth_status():

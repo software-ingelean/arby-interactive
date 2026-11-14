@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Arby · Centro de soporte</title>
   <link rel="stylesheet" href="/static/portal.css">
-  <script src="/static/portal.js?v=trill-control-4" defer></script>
+  <script src="/static/portal.js?v=wifi-saved-5" defer></script>
 </head>
 <body>
   <section id="login" class="login" hidden>
@@ -128,6 +128,7 @@
             <button id="refresh-network" class="secondary" type="button">↻ Buscar redes</button>
           </div>
           <p id="network-status" role="status" aria-live="polite">Consulta las redes para comprobar la conexión.</p>
+          <details><summary>Redes Wi-Fi guardadas</summary><p id="wifi-known-status" class="hint">Pulsa Buscar redes para consultar las redes que Arby conoce.</p><ul id="wifi-known-networks"></ul></details>
           <form id="wifi-form" class="wifi-form">
             <div class="wifi-field">
               <label for="ssid">Red Wi-Fi de internet · wlan0</label>

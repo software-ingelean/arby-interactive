@@ -221,6 +221,16 @@ class SupportTests(unittest.TestCase):
         with patch.dict(os.environ, {'ARBY_TRILL': 'false'}, clear=True), patch.object(run_arby, 'load_overrides', return_value=settings(self.database)['controls']):
             self.assertTrue(run_arby.load_config().trill)
 
+    def test_wifi_reuses_saved_profile_request_and_validates_flag(self):
+        self.login()
+        response = self.request('/api/network/connect', {'ssid': 'Home', 'use_saved': True})
+        self.assertEqual(response.status_code, 200)
+        self.system.assert_called_with('wifi', ssid='Home', password='', use_saved=True)
+        self.system.reset_mock()
+        response = self.request('/api/network/connect', {'ssid': 'Home', 'use_saved': 'yes'})
+        self.assertEqual(response.status_code, 400)
+        self.system.assert_not_called()
+
     def test_trill_control_rejects_non_boolean_values(self):
         for value in ('false', 0, None):
             with self.subTest(value=value), self.assertRaises(ValueError):
@@ -511,6 +521,56 @@ class HelperTests(unittest.TestCase):
             'Alias: Altavoz de sala',
         ]):
             self.assertEqual(self.helper.bluetooth_status()['devices'][0]['name'], 'Altavoz de sala')
+
+    def test_wifi_profiles_match_real_ssid_and_exclude_support_hotspot(self):
+        first, support = '11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222'
+        details = (f'connection.uuid:{first}\nconnection.interface-name:--\n'
+                   '802-11-wireless.ssid:Fair\\: Booth\n802-11-wireless.mode:infrastructure\n'
+                   f'connection.uuid:{support}\nconnection.interface-name:wlan1\n'
+                   '802-11-wireless.ssid:Arby-Soporte\n802-11-wireless.mode:ap\n')
+        with patch.object(self.helper, 'run', side_effect=[
+                SimpleNamespace(stdout=f'{first}:802-11-wireless\n{support}:802-11-wireless'),
+                SimpleNamespace(stdout=details)]) as run:
+            profiles = self.helper.wifi_profiles()
+        self.assertEqual(profiles, [{'uuid': first, 'ssid': 'Fair: Booth'}])
+        self.assertNotIn('--show-secrets', str(run.call_args_list))
+
+    def test_network_lists_known_available_and_out_of_range_networks(self):
+        with patch.object(self.helper, 'run', side_effect=[
+                SimpleNamespace(stdout='wlan0:wifi:connected:Home'),
+                SimpleNamespace(stdout='192.168.1.2'), SimpleNamespace(stdout='full'),
+                SimpleNamespace(stdout='Home:40:WPA2:*\nHome:90:WPA2:\nNew:70:WPA2:\n'),
+        ]), patch.object(self.helper, 'wifi_profiles', return_value=[
+                {'uuid': 'one', 'ssid': 'Home'}, {'uuid': 'two', 'ssid': 'Away'}]):
+            result = self.helper.execute({'action': 'network'})
+        self.assertEqual(result['networks'], [
+            {'ssid': 'Home', 'signal': '40', 'security': 'WPA2', 'known': True, 'connected': True},
+            {'ssid': 'New', 'signal': '70', 'security': 'WPA2', 'known': False, 'connected': False}])
+        self.assertEqual(result['known_networks'], [
+            {'ssid': 'Away', 'available': False, 'connected': False},
+            {'ssid': 'Home', 'available': True, 'connected': True}])
+
+    def test_known_wifi_activates_exact_saved_profile_without_password(self):
+        with patch.object(self.helper, 'wifi_profiles', return_value=[
+                {'uuid': 'wrong', 'ssid': 'Other'}, {'uuid': 'right', 'ssid': 'Fair'}]), patch.object(self.helper, 'run') as run:
+            result = self.helper.execute({'action': 'wifi', 'ssid': 'Fair', 'password': '', 'use_saved': True})
+        self.assertTrue(result['ok'])
+        self.assertEqual(run.call_args.args[0], ['/usr/bin/nmcli', '--wait', '20', 'connection', 'up', 'uuid', 'right', 'ifname', 'wlan0'])
+        self.assertNotIn('input', run.call_args.kwargs)
+
+    def test_deleted_saved_wifi_profile_requires_refresh(self):
+        with patch.object(self.helper, 'wifi_profiles', return_value=[]), patch.object(self.helper, 'run') as run:
+            result = self.helper.execute({'action': 'wifi', 'ssid': 'Gone', 'password': '', 'use_saved': True})
+        self.assertEqual(result, {'error_code': 'wifi_profile_missing'})
+        run.assert_not_called()
+
+    def test_new_open_wifi_connects_without_password(self):
+        with patch.object(self.helper, 'run') as run, patch.object(self.helper, 'wifi_profiles') as profiles:
+            result = self.helper.execute({'action': 'wifi', 'ssid': 'Open', 'password': '', 'use_saved': False})
+        self.assertTrue(result['ok'])
+        profiles.assert_not_called()
+        self.assertEqual(run.call_args.kwargs['input'], '\n')
+        self.assertIn('wlan0', run.call_args.args[0])
 
     def test_password_is_not_a_process_argument(self):
         with patch.object(self.helper, 'run') as run:

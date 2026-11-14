@@ -487,13 +487,18 @@ let wifiNetworks = [];
 function updateWifiSelection() {
   const network = wifiNetworks.find(item => item.ssid === $('ssid').value);
   const secured = Boolean(network?.security && network.security !== '--');
-  $('wifi-credentials').hidden = !network || !secured;
-  $('wifi-password').disabled = !secured;
+  const needsPassword = Boolean(network && secured && !network.known);
+  $('wifi-credentials').hidden = !needsPassword;
+  $('wifi-password').disabled = !needsPassword;
+  $('wifi-password').required = needsPassword;
   $('connect-wifi').disabled = !network;
-  $('wifi-hint').textContent = network ? (secured ? 'Introduce la contraseña y pulsa Conectar a la red.' : 'Esta red es abierta. Puedes conectarte sin contraseña.') : 'Elige una red de la lista. Pulsa Buscar redes para volver a explorar.';
+  $('connect-wifi').textContent = network?.known ? 'Conectar con la red guardada' : 'Conectar a la red';
+  $('wifi-hint').textContent = network ? (network.connected ? 'Esta es la red conectada actualmente.' : network.known ? 'Arby conoce esta red. Se utilizará su configuración guardada sin pedir la contraseña.' : secured ? 'Esta red es nueva para Arby. Introduce su contraseña; quedará guardada al conectar.' : 'Esta red es abierta. Puedes conectarte sin contraseña.') : 'Elige una red de la lista. Pulsa Buscar redes para volver a explorar.';
 }
 $('ssid').addEventListener('change', () => {
   $('wifi-password').value = '';
+  $('show-wifi-password').checked = false;
+  $('wifi-password').type = 'password';
   updateWifiSelection();
 });
 $('show-wifi-password').addEventListener('change', event => {
@@ -507,15 +512,32 @@ $('refresh-network').addEventListener('click', () => guarded($('refresh-network'
     const devices = result.devices.filter(device => device[1] !== 'loopback').map(device => `${device[0]}: ${device[3] || device[2]}`).join(' · ');
     $('network-status').textContent = `${states[result.connectivity] || states.unknown}. ${devices}. IP: ${result.addresses.join(', ') || 'sin dirección'}`;
     const selected = $('ssid').value;
-    wifiNetworks = result.networks.sort((a, b) => Number(b.signal) - Number(a.signal));
+    wifiNetworks = result.networks.sort((a, b) => Number(b.connected) - Number(a.connected) || Number(b.known) - Number(a.known) || Number(b.signal) - Number(a.signal));
+    const knownNetworks = result.known_networks || [];
+    $('wifi-known-status').textContent = knownNetworks.length ? `${knownNetworks.length} redes guardadas · ${knownNetworks.filter(item => item.available).length} disponibles ahora.` : 'Todavía no hay redes Wi-Fi guardadas para esta conexión.';
+    $('wifi-known-networks').replaceChildren();
+    for (const network of knownNetworks) {
+      const row = document.createElement('li');
+      row.textContent = `${network.ssid} · ${network.connected ? 'Conectada' : network.available ? 'Disponible' : 'Fuera de alcance'}`;
+      $('wifi-known-networks').append(row);
+    }
     $('ssid').replaceChildren(new Option(wifiNetworks.length ? 'Selecciona una red disponible' : 'No se encontraron redes', ''));
+    const knownGroup = document.createElement('optgroup');
+    knownGroup.label = 'Redes guardadas disponibles';
+    const newGroup = document.createElement('optgroup');
+    newGroup.label = 'Otras redes disponibles';
     for (const network of wifiNetworks) {
       const signal = Number(network.signal);
       const strength = signal >= 70 ? 'alta' : signal >= 40 ? 'media' : 'baja';
       const security = network.security && network.security !== '--' ? network.security : 'Abierta, sin contraseña';
-      $('ssid').add(new Option(`${network.ssid} · Señal ${strength} (${network.signal}%) · ${security}`, network.ssid));
+      (network.known ? knownGroup : newGroup).append(new Option(`${network.connected ? 'Conectada · ' : ''}${network.ssid} · Señal ${strength} (${network.signal}%) · ${security}`, network.ssid));
     }
-    $('ssid').value = wifiNetworks.some(item => item.ssid === selected) ? selected : '';
+    if (knownGroup.children.length) $('ssid').append(knownGroup);
+    if (newGroup.children.length) $('ssid').append(newGroup);
+    $('ssid').value = wifiNetworks.some(item => item.ssid === selected) ? selected : wifiNetworks.find(item => item.connected)?.ssid || '';
+    $('wifi-password').value = '';
+    $('show-wifi-password').checked = false;
+    $('wifi-password').type = 'password';
     $('ssid').disabled = !wifiNetworks.length;
     updateWifiSelection();
     if (!wifiNetworks.length) $('wifi-hint').textContent = 'Acerca Arby al router y pulsa Buscar redes para intentarlo de nuevo.';
@@ -529,11 +551,13 @@ $('wifi-form').addEventListener('submit', event => {
   event.preventDefault();
   guarded(event.submitter, async () => {
     if (!await confirmAction('Cambiar de red Wi-Fi', 'Se cambiará la conexión a internet de wlan0. Si estás accediendo por esa red, el panel puede desconectarse o cambiar de IP. La configuración de wlan1 se conserva. ¿Continuar?')) return;
+    const network = wifiNetworks.find(item => item.ssid === $('ssid').value);
+    if (!network) throw new Error('Selecciona una red disponible.');
     const password = $('wifi-password').disabled ? '' : $('wifi-password').value;
     $('network-status').textContent = `Conectando a ${$('ssid').value}… Esto puede tardar unos segundos.`;
     $('wifi-password').value = '';
     try {
-      const result = await api('/api/network/connect', 'POST', {ssid: $('ssid').value, password});
+      const result = await api('/api/network/connect', 'POST', {ssid: network.ssid, password, use_saved: Boolean(network.known)});
       $('network-status').textContent = result.message;
       notice(result.message);
     } catch (error) {

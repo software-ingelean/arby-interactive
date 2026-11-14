@@ -239,6 +239,33 @@ Si falta NetworkManager o hay problemas de permisos, el panel sigue disponible
 y muestra el fallo de la acción. No cambies la red de la Raspberry automáticamente
 al instalar este portal.
 
+## Redes Wi-Fi guardadas en Conexión
+
+**Buscar redes** muestra las redes disponibles de `wlan0`, separadas entre
+**Redes guardadas disponibles** y **Otras redes disponibles**. La lista indica
+la red conectada, la intensidad de señal y la seguridad. El desplegable **Redes
+Wi-Fi guardadas** también enumera las redes conocidas que están fuera de alcance.
+
+Para una red conocida, **Conectar con la red guardada** activa su perfil de
+NetworkManager por UUID en `wlan0`, sin pedir ni consultar la contraseña. La
+coincidencia usa el SSID real del perfil, aunque su nombre sea distinto. Se
+excluyen perfiles de punto de acceso y los ligados a otras interfaces como
+`wlan1`. Las contraseñas guardadas no se envían al navegador.
+
+Solo las redes nuevas protegidas muestran el campo de contraseña; las abiertas
+no lo necesitan. Las conexiones nuevas se guardan mediante NetworkManager. Los
+perfiles guardados deben tener credenciales utilizables por el servicio del
+sistema; los que dependen del llavero de una sesión de escritorio pueden requerir
+configuración por SSH. Si un perfil desaparece mientras el portal está abierto,
+se solicita actualizar la búsqueda.
+
+Después de actualizar el código, reinstala el helper y reinicia el portal:
+
+```bash
+sudo install -o root -g root -m 644 deploy/arby-system.py /usr/local/libexec/arby-system.py
+sudo systemctl restart arby-portal.service
+```
+
 ## Ajustes guardados y frases periódicas
 
 **Guardar ajustes** escribe en `config/arby_settings.sqlite3`, dentro del proyecto.

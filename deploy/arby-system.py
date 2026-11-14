@@ -32,6 +32,36 @@ def split_fields(line):
     return fields + [current]
 
 
+def wifi_profiles():
+    """Read only non-secret settings; profile names need not match their SSIDs."""
+    rows = run(['/usr/bin/nmcli', '-t', '-f', 'UUID,TYPE', 'connection', 'show'], timeout=4).stdout
+    identifiers = []
+    for row in rows.splitlines():
+        fields = split_fields(row)
+        if len(fields) == 2 and fields[1] in ('802-11-wireless', 'wifi') and re.fullmatch(r'[0-9a-fA-F-]{36}', fields[0]):
+            identifiers.extend(['uuid', fields[0]])
+    if not identifiers:
+        return []
+    details = run(['/usr/bin/nmcli', '-t', '-f',
+                   'connection.uuid,connection.interface-name,802-11-wireless.ssid,802-11-wireless.mode',
+                   'connection', 'show', *identifiers], timeout=4).stdout
+    profiles, current = [], {}
+    for row in details.splitlines():
+        fields = split_fields(row)
+        if len(fields) < 2:
+            continue
+        key, value = fields[0], ':'.join(fields[1:])
+        if key == 'connection.uuid':
+            current = {'uuid': value}
+            profiles.append(current)
+        elif current:
+            current[key] = value
+    return [{'uuid': p['uuid'], 'ssid': p['802-11-wireless.ssid']} for p in profiles
+            if p.get('802-11-wireless.ssid') and
+            p.get('connection.interface-name', '') in ('', '--', 'wlan0') and
+            p.get('802-11-wireless.mode', '') in ('', '--', 'infrastructure')]
+
+
 class BluetoothFailure(ValueError):
     pass
 
@@ -116,17 +146,29 @@ def execute_action(data):
         run(['/usr/bin/systemd-run', '--on-active=3s', '/usr/bin/systemctl', operation])
         return {'ok': True, 'message': 'La Raspberry se apagará en unos segundos. Espera antes de retirar la alimentación.' if action == 'shutdown' else 'La Raspberry se reiniciará en unos segundos.'}
     if action == 'network':
-        devices = run(['/usr/bin/nmcli', '-t', '-f', 'DEVICE,TYPE,STATE,CONNECTION', 'device']).stdout
-        addresses = run(['/usr/bin/hostname', '-I']).stdout.strip().split()
-        connectivity = run(['/usr/bin/nmcli', '-t', '-f', 'CONNECTIVITY', 'general']).stdout.strip()
-        rows = run(['/usr/bin/nmcli', '-t', '-f', 'SSID,SIGNAL,SECURITY', 'device', 'wifi', 'list', 'ifname', 'wlan0', '--rescan', 'auto']).stdout
-        networks = []
+        devices = run(['/usr/bin/nmcli', '-t', '-f', 'DEVICE,TYPE,STATE,CONNECTION', 'device'], timeout=4).stdout
+        addresses = run(['/usr/bin/hostname', '-I'], timeout=2).stdout.strip().split()
+        connectivity = run(['/usr/bin/nmcli', '-t', '-f', 'CONNECTIVITY', 'general'], timeout=4).stdout.strip()
+        rows = run(['/usr/bin/nmcli', '-t', '-f', 'SSID,SIGNAL,SECURITY,IN-USE', 'device', 'wifi', 'list', 'ifname', 'wlan0', '--rescan', 'auto'], timeout=15).stdout
+        profiles = wifi_profiles()
+        known = {profile['ssid'] for profile in profiles}
+        by_ssid = {}
         for line in rows.splitlines():
             fields = split_fields(line)
-            if len(fields) == 3 and fields[0] and fields[0] not in [item['ssid'] for item in networks]:
-                networks.append(dict(zip(('ssid', 'signal', 'security'), fields)))
+            if len(fields) != 4 or not fields[0]:
+                continue
+            ssid, signal, security, active = fields
+            item = {'ssid': ssid, 'signal': signal, 'security': security,
+                    'known': ssid in known, 'connected': active == '*'}
+            previous = by_ssid.get(ssid)
+            if previous is None or item['connected'] or (not previous['connected'] and int(signal) > int(previous['signal'])):
+                by_ssid[ssid] = item
+        networks = list(by_ssid.values())
+        saved = [{'ssid': ssid, 'available': ssid in by_ssid,
+                  'connected': by_ssid.get(ssid, {}).get('connected', False)} for ssid in sorted(known)]
         return {'devices': [split_fields(line) for line in devices.splitlines()],
-                'addresses': addresses, 'connectivity': connectivity, 'networks': networks}
+                'addresses': addresses, 'connectivity': connectivity, 'networks': networks,
+                'known_networks': saved}
     if action == 'bluetooth':
         return bluetooth_status()
     if action == 'bluetooth_scan':
@@ -196,12 +238,22 @@ def execute_action(data):
                 or not isinstance(password, str) or len(password) > 128
                 or any(c in ssid + password for c in '\r\n\x00')):
             raise ValueError('Invalid Wi-Fi parameters')
+        use_saved = data.get('use_saved', not bool(password))
+        if type(use_saved) is not bool:
+            raise ValueError('Invalid Wi-Fi preference')
         # Answer nmcli's secret prompt through stdin, never argv or logs.
         # passwd-file belongs to `connection up`, not `device wifi connect`.
         try:
-            run(['/usr/bin/nmcli', '--wait', '20', '--ask',
-                 'device', 'wifi', 'connect', ssid, 'ifname', 'wlan0'],
-                input=password + '\n')
+            profile = next((p for p in wifi_profiles() if p['ssid'] == ssid), None) if use_saved else None
+            if data.get('use_saved') is True and profile is None:
+                return {'error_code': 'wifi_profile_missing'}
+            if profile:
+                run(['/usr/bin/nmcli', '--wait', '20', 'connection', 'up',
+                     'uuid', profile['uuid'], 'ifname', 'wlan0'])
+            else:
+                run(['/usr/bin/nmcli', '--wait', '20', '--ask',
+                     'device', 'wifi', 'connect', ssid, 'ifname', 'wlan0'],
+                    input=password + '\n')
         except subprocess.TimeoutExpired:
             return {'error_code': 'wifi_timeout'}
         except subprocess.CalledProcessError as exc:
