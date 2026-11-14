@@ -9,14 +9,6 @@ EMOTION_COLORS = {
     "locos": (255, 0, 180), "enojado": (255, 0, 0),
     "duda": (255, 130, 0), "guiño ojo": (255, 80, 140),
     "dormido": (0, 0, 35), "relato extenso": (0, 180, 180),
-    "enamorados": (255, 50, 110), "estrellas": (255, 200, 40),
-    "gafas de sol": (255, 150, 20), "riendo": (100, 255, 60),
-    "timidos": (255, 120, 170), "orgullosos": (255, 180, 60),
-    "relajados": (60, 210, 170), "curiosos": (40, 180, 255),
-    "asustados": (180, 140, 255), "aburridos": (90, 130, 180),
-    "mareados": (180, 80, 255), "traviesos": (255, 70, 200),
-    "dolares": (60, 255, 90), "aturdidos": (255, 110, 60),
-    "risa nerviosa": (255, 210, 40),
 }
 MATRIX_STATES = tuple(EMOTION_COLORS)
 DEFAULT_STATE = "pensativos"

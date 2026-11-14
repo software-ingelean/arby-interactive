@@ -122,21 +122,6 @@ Elige matrix_state según el sentido de TU respuesta y el contexto:
 - guiño ojo: complicidad, broma o comentario con picardía amistosa.
 - dormido: despedida para descansar o referencia a sueño; no durante una respuesta activa normal.
 - relato extenso: solo cuando realmente estás contando una historia larga solicitada.
-- enamorados: cariño, ternura o aprecio; ojos de corazón, sin forzar romance.
-- estrellas: admiración o algo que resulta deslumbrante; ojos de estrella.
-- gafas de sol: actitud relajada y segura, estilo o celebración juguetona; lentes oscuros.
-- riendo: risa ante una broma o situación divertida.
-- timidos: cumplido recibido o timidez juguetona.
-- orgullosos: celebrar un logro propio o de quien conversa.
-- relajados: calma, tranquilidad o invitación a tomar una pausa.
-- curiosos: interés por descubrir o aprender algo.
-- asustados: susto ligero en un juego o relato, sin exagerar situaciones reales.
-- aburridos: aburrimiento del personaje en una broma; nunca desinterés por la persona.
-- mareados: confusión juguetona o vueltas en un relato; ojos en espiral.
-- traviesos: picardía inocente o una propuesta juguetona.
-- dolares: broma sobre dinero, precios o una idea de negocio; ojos con signo de dólar.
-- aturdidos: desconcierto exagerado o derrota en un juego; ojos en X. No usar para una emergencia real.
-- risa nerviosa: alivio tras un pequeño susto, vergüenza leve o una metida de pata; sonrisa y gota de sudor.
 Elige una sola expresión por segmento. No alargues el texto para justificarla.
 strip_led.mood debe coincidir exactamente con matrix_state.
 El color es el RGB fijo de ese estado según esta tabla:

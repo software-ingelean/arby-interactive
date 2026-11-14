@@ -1,4 +1,4 @@
-# Arby: animaciones de ojos aprobadas, 27 estados con RGB
+# Arby: animaciones de ojos aprobadas, versión 2.1 con RGB
 
 Dos paneles de 32 × 32, cada uno con un ojo y su ceja. El lienzo lógico mide
 64 × 32. Los dibujos se calculan con Pillow a resolución nativa; los GIF son
@@ -13,7 +13,7 @@ reemplazarlo. Python también puede importar esta carpeta como paquete namespace
 
 | Archivo del ZIP | Destino | Acción |
 | --- | --- | --- |
-| `libraries/eyes/arby_eyes.py` | `arby-interactive/libraries/eyes/arby_eyes.py` | Reemplazar o agregar; motor de las 27 animaciones |
+| `libraries/eyes/arby_eyes.py` | `arby-interactive/libraries/eyes/arby_eyes.py` | Reemplazar o agregar; motor de las 12 animaciones |
 | `libraries/examples/demo_eyes.py` | `arby-interactive/libraries/examples/demo_eyes.py` | Reemplazar o agregar; simulador actualizado |
 | `libraries/eyes/matrix_output.py` | `arby-interactive/libraries/eyes/matrix_output.py` | Copiar si falta; adaptador físico, igual a la entrega anterior |
 | `libraries/examples/export_previews.py` | `arby-interactive/libraries/examples/export_previews.py` | Reemplazar o agregar; herramienta opcional para regenerar GIF |
@@ -55,7 +55,7 @@ Pygame: únicamente el simulador lo utiliza.
 | 0 | relato extenso |
 | D | default / reposo |
 | C | cargando |
-| Espacio | Siguiente estado entre los 24; incluye todas las expresiones nuevas |
+| Espacio | Siguiente estado |
 | A | Activar o desactivar el cambio automático cada cinco segundos |
 | G | Mostrar u ocultar cuadrícula |
 | Esc | Cerrar |
@@ -64,7 +64,7 @@ Ejemplos para iniciar en un estado específico:
 
 ```bash
 uv run python -m libraries.examples.demo_eyes --state cargando
-uv run python -m libraries.examples.demo_eyes --state enamorados
+uv run python -m libraries.examples.demo_eyes --state pensativos
 ```
 
 ## Estados y diseño
@@ -73,33 +73,9 @@ Se conservan los diez nombres de emoción ya usados por Gemini:
 `triste`, `alegres`, `sorprendidos`, `pensativos`, `locos`, `enojado`, `duda`,
 `guiño ojo`, `dormido`, `relato extenso`.
 
-Se suman quince expresiones, disponibles también para la conversación:
-
-| Estado | Diseño |
-| --- | --- |
-| enamorados | Ojos de corazón con un pequeño latido |
-| estrellas | Ojos de estrella pulsantes |
-| gafas de sol | Lentes oscuros con montura, puente y reflejos animados |
-| riendo | Ojos sonrientes con rebote más marcado |
-| timidos | Mirada baja hacia los lados y cejas suaves |
-| orgullosos | Mirada alta y ojos entrecerrados |
-| relajados | Ojos bajos con movimiento de respiración |
-| curiosos | Ojos asimétricos y mirada exploradora |
-| asustados | Ojos altos, pupilas pequeñas y temblor |
-| aburridos | Párpados bajos y mirada lenta |
-| mareados | Ojos en espiral con movimiento |
-| traviesos | Cejas opuestas y mirada lateral |
-| dolares | Signos de dólar con rebote |
-| aturdidos | Ojos en X con balanceo |
-| risa nerviosa | Ojos sonrientes sin cejas y una gota de sudor azul en el panel derecho |
-
-El catálogo de emociones y colores tiene una única fuente en
-`libraries/core/arby_response.py`; el motor y el esquema del bot lo comparten.
-Las instrucciones del bot explican cuándo usar cada expresión.
-
-Se mantienen dos estados de aplicación: `default` y `cargando`. `EMOTION_STATES`
-contiene las 25 emociones; `SYSTEM_STATES` contiene estos dos estados;
-`STATES` reúne los 27 estados. El estado inicial de `EyeAnimator()` ahora es `default`.
+Se agregan dos estados de aplicación: `default` y `cargando`. `EMOTION_STATES`
+contiene las diez emociones; `SYSTEM_STATES` contiene estos dos estados;
+`STATES` reúne los doce. El estado inicial de `EyeAnimator()` ahora es `default`.
 
 | Estado actualizado | Diseño |
 | --- | --- |
@@ -110,8 +86,8 @@ contiene las 25 emociones; `SYSTEM_STATES` contiene estos dos estados;
 | default | Mirada tranquila, cejas relajadas y parpadeo |
 | cargando | Pupilas en movimiento circular y cejas que suben alternadamente |
 
-Las expresiones anteriores conservan su diseño. Las nuevas formas de corazón,
-estrella y espiral se mezclan suavemente durante las transiciones.
+Los otros seis diseños conservan su aspecto anterior. Las doce expresiones se
+verificaron comparando los píxeles de 1.200 fotogramas con la propuesta aprobada.
 Los cambios de estado duran 0,30 segundos; se interpolan geometría y cejas, y se
 mezcla suavemente la forma sonriente al entrar o salir de `alegres`.
 
@@ -222,7 +198,7 @@ También se comprobaron colores en ambos paneles y sus cejas, validación sin
 cambios parciales, actualización de RGB sin reiniciar la emoción y vuelta al color
 de reposo.
 Los controles D, C y Esc se comprobaron ejecutando Pygame con pantalla simulada.
-`export_previews` genera el tablero y 27 GIF de 64 × 32 en `previews/`.
+`export_previews` genera el tablero y doce GIF de 64 × 32 en `previews/`.
 
 Referencias del controlador: [repositorio](https://github.com/hzeller/rpi-rgb-led-matrix),
 [mapeo GPIO](https://github.com/hzeller/rpi-rgb-led-matrix/blob/master/wiring.md).
