@@ -22,7 +22,7 @@ def main():
     palette.putpalette(sum((list(c) for c in colors),[])+[0]*(768-len(colors)*3))
     for i in range(100):
         t=i/20
-        board=Image.new('RGB',(720,908),(12,18,26))
+        board=Image.new('RGB',(720, 104 + ((len(STATES)+1)//2)*134),(12,18,26))
         draw=ImageDraw.Draw(board)
         draw.text((24,14),'ARBY / 32 × 32 por ojo y ceja',font=title,fill=(180,235,255))
         draw.text((24,44),'Resolución real ampliada sin suavizado · dos paneles por expresión',font=text,fill=(170,190,205))

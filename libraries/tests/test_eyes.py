@@ -21,11 +21,29 @@ class EyesTests(unittest.TestCase):
                 self.assertEqual(frame.mode,'RGB')
                 for side in (0,1):
                     panel=frame.crop((32*side,0,32*side+32,32))
-                    self.assertIsNotNone(panel.crop((0,0,32,13)).getbbox())
+                    if state != "risa nerviosa":
+                        self.assertIsNotNone(panel.crop((0,0,32,13)).getbbox())
                     self.assertIsNotNone(panel.crop((0,13,32,32)).getbbox())
                 digest.update(frame.tobytes())
             signatures.add(digest.digest())
-        self.assertEqual(len(signatures),12)
+        self.assertEqual(len(signatures),27)
+
+    def test_catalog_matches_bot_contract(self):
+        from libraries.core.arby_response import MATRIX_STATES, make_segment
+        from libraries.eyes.arby_eyes import EMOTION_STATES
+        self.assertEqual(EMOTION_STATES, MATRIX_STATES)
+        self.assertEqual(len(MATRIX_STATES), 25)
+        for state in MATRIX_STATES:
+            animator = EyeAnimator()
+            animator.apply_response(make_segment("Hola", state), now=0)
+            self.assertEqual(animator.state, state)
+
+    def test_new_shapes_remain_visible_and_animated(self):
+        for state in ("enamorados", "estrellas", "mareados", "gafas de sol",
+                      "dolares", "aturdidos", "risa nerviosa"):
+            animator = EyeAnimator(state)
+            self.assertNotEqual(animator.render(0).tobytes(), animator.render(.8).tobytes())
+            self.assertIsNotNone(animator.render(.8).crop((0, 13, 32, 32)).getbbox())
 
     def test_aliases_and_validation(self):
         self.assertEqual(normalize_state('Guiño_ojo'),'guiño ojo')
