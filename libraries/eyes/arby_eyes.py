@@ -10,7 +10,7 @@ import unicodedata
 from PIL import Image, ImageDraw
 
 EMOTION_STATES = ("triste", "alegres", "sorprendidos", "pensativos", "locos", "enojado",
-          "duda", "guiño ojo", "dormido", "relato extenso")
+          "duda", "guiño ojo", "dormido", "relato extenso", "enamorados")
 SYSTEM_STATES = ("default", "cargando")
 STATES = EMOTION_STATES + SYSTEM_STATES
 ALIASES = {"default": "default", "reposo": "default", "idle": "default",
@@ -18,7 +18,8 @@ ALIASES = {"default": "default", "reposo": "default", "idle": "default",
            "sorprendido": "sorprendidos", "sorprendidos": "sorprendidos",
            "pensativo": "pensativos", "pensativos": "pensativos", "loco": "locos", "locos": "locos",
            "enojado": "enojado", "duda": "duda", "guino ojo": "guiño ojo",
-           "dormido": "dormido", "relato extenso": "relato extenso"}
+           "dormido": "dormido", "relato extenso": "relato extenso",
+           "enamorado": "enamorados", "enamorados": "enamorados"}
 
 
 def normalize_state(state: str) -> str:
@@ -47,6 +48,7 @@ class EyePose:
     closed: float = 0
     brow_width: float = 2
     smile: float = 0
+    heart: float = 0
 
 
 def _mix(a, b, amount):
@@ -125,6 +127,9 @@ def _pose(state, side, t):
                     brow_outer=7 - emphasis * 1.4,
                     brow_inner=7 - emphasis * 1.4,
                     pupil_x=1.6 * math.sin(t * 0.8), pupil_y=0.5 * math.sin(t * 1.1))
+    elif state == "enamorados":
+        p = replace(p, heart=1, width=22 + 2*bounce, height=18 + 2*bounce,
+                    cy=22, brow_outer=6, brow_inner=7, brow_arch=-4)
     if state != "dormido":
         p = replace(p, closed=max(p.closed, _blink(t)))
     return p
@@ -290,4 +295,19 @@ class EyeAnimator:
                                (15.5, pose.cy + 3 - 2 * lift),
                                (26, pose.cy + 3)], self.style.eye_color, 3)
             panel = Image.blend(panel, smiling, min(1.0, pose.smile))
+        if pose.heart > 0:
+            heart_panel = Image.new("RGB", (32, 32))
+            hd = ImageDraw.Draw(heart_panel)
+            _curve(hd, [outer, (15.5, (outer[1]+inner[1])/2+pose.brow_arch), inner],
+                   self.style.brow_color, max(2, round(pose.brow_width)))
+            points = []
+            for i in range(80):
+                angle = 2 * math.pi * i / 80
+                x = 16 * math.sin(angle)**3
+                y = (13*math.cos(angle)-5*math.cos(2*angle)
+                     -2*math.cos(3*angle)-math.cos(4*angle))
+                points.append((round(16+x*pose.width/32),
+                               round(pose.cy-y*pose.height*openness/32)))
+            hd.polygon(points, fill=self.style.eye_color)
+            panel = Image.blend(panel, heart_panel, min(1.0, pose.heart))
         return panel

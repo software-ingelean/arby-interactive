@@ -13,7 +13,7 @@ reemplazarlo. Python también puede importar esta carpeta como paquete namespace
 
 | Archivo del ZIP | Destino | Acción |
 | --- | --- | --- |
-| `libraries/eyes/arby_eyes.py` | `arby-interactive/libraries/eyes/arby_eyes.py` | Reemplazar o agregar; motor de las 12 animaciones |
+| `libraries/eyes/arby_eyes.py` | `arby-interactive/libraries/eyes/arby_eyes.py` | Reemplazar o agregar; motor de las 13 animaciones |
 | `libraries/examples/demo_eyes.py` | `arby-interactive/libraries/examples/demo_eyes.py` | Reemplazar o agregar; simulador actualizado |
 | `libraries/eyes/matrix_output.py` | `arby-interactive/libraries/eyes/matrix_output.py` | Copiar si falta; adaptador físico, igual a la entrega anterior |
 | `libraries/examples/export_previews.py` | `arby-interactive/libraries/examples/export_previews.py` | Reemplazar o agregar; herramienta opcional para regenerar GIF |
@@ -55,7 +55,7 @@ Pygame: únicamente el simulador lo utiliza.
 | 0 | relato extenso |
 | D | default / reposo |
 | C | cargando |
-| Espacio | Siguiente estado |
+| Espacio | Siguiente estado, incluido enamorados |
 | A | Activar o desactivar el cambio automático cada cinco segundos |
 | G | Mostrar u ocultar cuadrícula |
 | Esc | Cerrar |
@@ -71,11 +71,12 @@ uv run python -m libraries.examples.demo_eyes --state pensativos
 
 Se conservan los diez nombres de emoción ya usados por Gemini:
 `triste`, `alegres`, `sorprendidos`, `pensativos`, `locos`, `enojado`, `duda`,
-`guiño ojo`, `dormido`, `relato extenso`.
+`guiño ojo`, `dormido`, `relato extenso`. Se incorpora `enamorados` como undécima
+emoción, también disponible mediante el alias `enamorado` en el motor.
 
 Se agregan dos estados de aplicación: `default` y `cargando`. `EMOTION_STATES`
-contiene las diez emociones; `SYSTEM_STATES` contiene estos dos estados;
-`STATES` reúne los doce. El estado inicial de `EyeAnimator()` ahora es `default`.
+contiene las once emociones; `SYSTEM_STATES` contiene estos dos estados;
+`STATES` reúne los trece estados. El estado inicial de `EyeAnimator()` ahora es `default`.
 
 | Estado actualizado | Diseño |
 | --- | --- |
@@ -86,8 +87,9 @@ contiene las diez emociones; `SYSTEM_STATES` contiene estos dos estados;
 | default | Mirada tranquila, cejas relajadas y parpadeo |
 | cargando | Pupilas en movimiento circular y cejas que suben alternadamente |
 
-Los otros seis diseños conservan su aspecto anterior. Las doce expresiones se
-verificaron comparando los píxeles de 1.200 fotogramas con la propuesta aprobada.
+Los otros seis diseños anteriores conservan su aspecto. Se añade `enamorados`: ojos
+de corazón con latido suave y transición mezclada con los ojos normales. El bot lo
+puede elegir para expresar cariño, ternura o aprecio; su color es rosa (255, 50, 110).
 Los cambios de estado duran 0,30 segundos; se interpolan geometría y cejas, y se
 mezcla suavemente la forma sonriente al entrar o salir de `alegres`.
 
@@ -198,7 +200,7 @@ También se comprobaron colores en ambos paneles y sus cejas, validación sin
 cambios parciales, actualización de RGB sin reiniciar la emoción y vuelta al color
 de reposo.
 Los controles D, C y Esc se comprobaron ejecutando Pygame con pantalla simulada.
-`export_previews` genera el tablero y doce GIF de 64 × 32 en `previews/`.
+`export_previews` genera el tablero y trece GIF de 64 × 32 en `previews/`.
 
 Referencias del controlador: [repositorio](https://github.com/hzeller/rpi-rgb-led-matrix),
 [mapeo GPIO](https://github.com/hzeller/rpi-rgb-led-matrix/blob/master/wiring.md).

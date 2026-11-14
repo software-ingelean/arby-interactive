@@ -9,6 +9,7 @@ EMOTION_COLORS = {
     "locos": (255, 0, 180), "enojado": (255, 0, 0),
     "duda": (255, 130, 0), "guiño ojo": (255, 80, 140),
     "dormido": (0, 0, 35), "relato extenso": (0, 180, 180),
+    "enamorados": (255, 50, 110),
 }
 MATRIX_STATES = tuple(EMOTION_COLORS)
 DEFAULT_STATE = "pensativos"

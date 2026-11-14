@@ -25,7 +25,26 @@ class EyesTests(unittest.TestCase):
                     self.assertIsNotNone(panel.crop((0,13,32,32)).getbbox())
                 digest.update(frame.tobytes())
             signatures.add(digest.digest())
-        self.assertEqual(len(signatures),12)
+        self.assertEqual(len(signatures),13)
+
+    def test_heart_contract_animation_and_alias(self):
+        from libraries.core.arby_response import MATRIX_STATES, make_segment
+        from libraries.eyes.arby_eyes import EMOTION_STATES
+        self.assertEqual(set(EMOTION_STATES), set(MATRIX_STATES))
+        self.assertEqual(normalize_state("Enamorado"), "enamorados")
+        animator = EyeAnimator()
+        animator.apply_response(make_segment("Qué lindo detalle", "enamorados"), now=0)
+        self.assertEqual(animator.state, "enamorados")
+        self.assertEqual(animator.style.eye_color, (255, 50, 110))
+        heart = EyeAnimator("enamorados")
+        self.assertNotEqual(heart.render(0).tobytes(), heart.render(.4).tobytes())
+        panel = heart.render(0).crop((0, 0, 32, 32))
+        # Two lobes, a notch at the top and a central point at the bottom.
+        color = heart.style.eye_color
+        self.assertEqual(panel.getpixel((10, 16)), color)
+        self.assertEqual(panel.getpixel((22, 16)), color)
+        self.assertEqual(panel.getpixel((16, 16)), (0, 0, 0))
+        self.assertEqual(panel.getpixel((16, 31)), color)
 
     def test_aliases_and_validation(self):
         self.assertEqual(normalize_state('Guiño_ojo'),'guiño ojo')
