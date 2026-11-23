@@ -1,6 +1,6 @@
 # Contexto integrado de Arby e INGELEAN
 
-Versión 5 · 2026-11-12
+Versión 6 · 2026-11-23
 
 El bloque A se incorpora al prompt de conversación de oficina. El bloque B se indexa por fichas en FAISS. En modo evento, el código aplica su propio prompt y recupera únicamente fichas públicas. El esquema de segmentos y la paleta se definen en la aplicación.
 
@@ -193,10 +193,6 @@ La acerola es un fruto tropical rojizo de sabor dulce y ácido, con alto conteni
 
 Fuente: Guion_Arby_Equipo_Ingelean.pdf, página 1, apartado 2.
 
-## ARB-010 | Coffee Party Fest
-
-Coffee Party Fest se celebra el 15 y 16 de noviembre de 2026. Es un espacio para conectar con otras personas y disfrutar de música en vivo, bienestar, deporte, moda, gastronomía y cultura del café de especialidad en un ambiente de energía y diversión. Fuente: descripción del equipo de Arby.
-
 ## ING-001 | INGELEAN: identidad y actividad
 
 INGELEAN es una empresa de Pereira, Colombia, fundada en 2013. Desarrolla soluciones de Industria 4.0 que combinan automatización, hardware, software, adquisición de datos, conectividad y control.
@@ -205,9 +201,9 @@ Fuente: BROCHURE_GENERAL.pdf, páginas 1-4 · BROCHURE_AUTOMATIZACIÓN.pdf, pág
 
 ## ING-002 | INGELEAN: portafolio de servicios y productos
 
-Servicios: automatización industrial, hardware y software a la medida, mantenimiento y automatización robótica de procesos (RPA). Portafolio: parqueaderos automáticos, Beaver Time, tarjetas NFC, BitKit, NX-100, DMP TH22B, DMP Lab IoT, DMP Lab Industry y tarjeta de adquisición industrial.
+Servicios: automatización industrial, hardware y software a la medida, mantenimiento, automatización robótica de procesos (RPA) y experiencias interactivas para eventos y marcas (asistentes con IA como Arby, juegos y sensores). Portafolio: parqueaderos automáticos, Beaver Time, tarjetas NFC, BitKit, NX-100, DMP TH22B, DMP Lab IoT, DMP Lab Industry y tarjeta de adquisición industrial.
 
-Fuente: BROCHURE_GENERAL.pdf, páginas 2 y 5-11 · brochures del portafolio.
+Fuente: BROCHURE_GENERAL.pdf, páginas 2 y 5-11 · BROCHURE_EXPERIENCIAS_INTERACTIVAS.pdf, páginas 3-5 · brochures del portafolio.
 
 ## ING-003 | INGELEAN: equipo, presencia y marcas mencionadas
 
@@ -430,3 +426,27 @@ Fuente: TARJETAS_NFC.pdf, página 11.
 NX-100, Lab IoT, Lab Industry y tarjeta industrial tienen fichas propias. En el NX-100, los 25 Mbps mencionados para Modbus no son una velocidad garantizada. Confirma LTE, GPS, bandas LoRa, seguridad y límites de los bornes según módulo, versión y firmware. Los casos de éxito describen proyectos concretos.
 
 Fuente: DATALOGGER.pdf, páginas 5-8 · DMP_LAB_IOT.pdf, página 7 · DMP_LAB_INDUSTRY.pdf, página 6 · TARJETA_DE_ADQUISICION_.pdf, página 19.
+
+## ING-040 | Experiencias interactivas: servicio y aplicaciones
+
+INGELEAN diseña experiencias que combinan tecnología, creatividad e interacción para atraer público y generar recordación de marca. Ofrece juegos con retos y competencia, personajes o asistentes con inteligencia artificial que conversan, interacción con sensores, gestos o actividad física, y desarrollos personalizados. Aplicaciones: eventos empresariales, lanzamientos de productos, aperturas de tiendas, ferias, exposiciones, activaciones de marca, centros comerciales y puntos de venta.
+
+Fuente: BROCHURE_EXPERIENCIAS_INTERACTIVAS.pdf, páginas 2-3.
+
+## ING-041 | Experiencias interactivas: modalidades y personalización
+
+Modalidades: experiencia básica, estándar lista para activación; personalización de marca, con adaptación visual, mensajes, narrativa y dinámica comercial; activación interactiva, con retos, concursos o participación del público; desarrollo a medida, con hardware, software, sensores, IA y captura avanzada de datos según el proyecto. El alcance se acuerda para cada experiencia.
+
+Fuente: BROCHURE_EXPERIENCIAS_INTERACTIVAS.pdf, página 4.
+
+## ING-042 | Experiencias interactivas: datos y métricas
+
+Según el alcance contratado, INGELEAN puede entregar número de participantes, tiempo de interacción, resultados y estadísticas de la activación. La captura de datos de contacto es opcional y requiere autorización. Son capacidades del servicio: no implican que Arby tenga todas esas funciones habilitadas ni que esté recolectando datos de quien conversa. No afirmes disponer de métricas o contactos sin información confirmada de la aplicación.
+
+Fuente: BROCHURE_EXPERIENCIAS_INTERACTIVAS.pdf, páginas 4 y 6.
+
+## ING-043 | Experiencias interactivas: Arby como ejemplo y cotización
+
+Arby es un ejemplo de las experiencias interactivas con IA de INGELEAN: un personaje que conversa con las personas y puede formar parte de una activación de marca. Si preguntan por desarrollar algo similar, explica brevemente el servicio y orienta al contacto comercial cuando sea pertinente, sin convertir cada charla en una venta. El valor depende del tipo de experiencia, duración, personalización, logística y requerimientos técnicos; no se publica una tarifa fija. Contacto del brochure: +57 311 419 68 03, comercial@ingelean.com, www.ingelean.com, Pereira, Colombia.
+
+Fuente: BROCHURE_EXPERIENCIAS_INTERACTIVAS.pdf, páginas 2, 5 y 7 · estilo conversacional definido en el bloque A.
