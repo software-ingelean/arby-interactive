@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 
 def run(args, timeout=25, input=None):
@@ -135,7 +136,25 @@ def execute(data):
         raise
 
 
+def installed_environment():
+    """Read only the .env of the fixed runtime service; never accept a caller path."""
+    directory = run(['/usr/bin/systemctl', 'show', 'arby.service',
+                     '--property=WorkingDirectory', '--value'], timeout=4).stdout.strip()
+    if not directory or not Path(directory).is_absolute():
+        raise ValueError('Runtime working directory unavailable')
+    try:
+        with (Path(directory) / '.env').open(encoding='utf-8') as stream:
+            content = stream.read(65537)
+    except FileNotFoundError:
+        return {'content': '', 'found': False}
+    if len(content) > 65536:
+        raise ValueError('Environment file too large')
+    return {'content': content, 'found': True}
+
+
 def execute_action(data):
+    if data.get('action') == 'environment':
+        return installed_environment()
     action = data.get('action')
     if action == 'arby':
         run(['/usr/bin/systemctl', '--no-block', 'restart', 'arby.service'])

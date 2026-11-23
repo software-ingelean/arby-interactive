@@ -32,7 +32,7 @@ class SupportTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.database = Path(temp.name) / 'settings.sqlite3'
         self.system = Mock(return_value={'ok': True})
-        self.app = create_app(self.database, self.password_hash, self.system)
+        self.app = create_app(self.database, self.password_hash, self.system, environment_path=self.database.parent / '.env')
         self.client = PortalClient(self.app)
         self.csrf = self.client.get('/api/session').json()['csrf']
         isolate_runtime(self, self.database)
@@ -362,7 +362,7 @@ class SupportTests(unittest.TestCase):
         saved['controls'] = {'mute': False, 'mic_gain_db': 9}
         save_settings(saved, self.database)
         initialize(self.database)
-        app = create_app(self.database, self.password_hash, system=self.system)
+        app = create_app(self.database, self.password_hash, system=self.system, environment_path=self.database.parent / '.env')
         self.assertIsNotNone(app)
         reloaded = settings(self.database)
         self.assertEqual(reloaded, saved)
@@ -390,6 +390,22 @@ class HelperTests(unittest.TestCase):
             with self.assertRaises(ValueError), patch.object(self.helper, 'run') as run:
                 self.helper.execute(payload)
             run.assert_not_called()
+
+    def test_environment_helper_uses_service_directory_and_ignores_caller_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / '.env').write_text('ARBY_EYES=matrix\n')
+            with patch.object(self.helper, 'run', return_value=SimpleNamespace(stdout=directory + '\n')) as run:
+                result = self.helper.execute({'action': 'environment', 'path': '/etc/shadow'})
+            self.assertEqual(result, {'content': 'ARBY_EYES=matrix\n', 'found': True})
+            run.assert_called_once_with(['/usr/bin/systemctl', 'show', 'arby.service',
+                                        '--property=WorkingDirectory', '--value'], timeout=4)
+
+    def test_environment_helper_handles_missing_file_and_rejects_oversized_file(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(self.helper, 'run', return_value=SimpleNamespace(stdout=directory)):
+            self.assertFalse(self.helper.execute({'action': 'environment'})['found'])
+            (Path(directory) / '.env').write_text('x' * 65537)
+            with self.assertRaises(ValueError):
+                self.helper.execute({'action': 'environment'})
 
     def test_bluetooth_timeout_option_only_for_discovery(self):
         for command, args in [('show', ()), ('power', ('on',)), ('info', ('AA:BB:CC:DD:EE:FF',)), ('scan', ('on',))]:

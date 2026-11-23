@@ -744,10 +744,38 @@ async function loadConfiguration() {
   const data = await api('/api/admin/configuration');
   const container = $('configuration-fields');
   container.replaceChildren();
+  const environment = data.environment;
+  $('configuration-environment').textContent = environment.available ?
+    environment.found ? 'Valores leídos de .env. Las preferencias del portal se indican en cada campo.' :
+      'No hay archivo .env: se muestran las preferencias del portal y los valores predeterminados.' : environment.error;
+  $('configuration-environment').classList.toggle('error', !environment.available);
+  const groups = new Map();
+  for (const [index, category] of data.categories.entries()) {
+    const section = document.createElement('details');
+    section.className = 'configuration-category';
+    section.open = index === 0;
+    const summary = document.createElement('summary');
+    const title = document.createElement('strong');
+    title.textContent = category.label;
+    const count = document.createElement('span');
+    count.className = 'pill';
+    count.textContent = `${data.fields.filter(field => field.category === category.id).length} opciones`;
+    summary.append(title, count);
+    const description = document.createElement('p');
+    description.className = 'hint configuration-description';
+    description.textContent = category.description;
+    const grid = document.createElement('div');
+    grid.className = 'configuration-grid';
+    section.append(summary, description, grid);
+    container.append(section);
+    groups.set(category.id, grid);
+  }
+  const sourceLabels = {portal: 'Preferencia del portal', env: 'Valor de .env',
+    default: 'Valor predeterminado', runtime: 'Última ejecución; .env sin consultar'};
   for (const field of data.fields) {
     const wrapper = document.createElement('fieldset');
     wrapper.className = 'panel';
-    wrapper.dataset.key = field.key;
+    wrapper.dataset.configKey = field.key;
     const label = document.createElement('label');
     label.textContent = configTitles[field.key] || field.variable;
     const input = document.createElement(field.choices || field.type === 'bool' ? 'select' : 'input');
@@ -766,7 +794,21 @@ async function loadConfiguration() {
     input.value = field.secret ? '' : field.value ?? '';
     input.dataset.type = field.type;
     input.dataset.secret = String(field.secret);
-    if (field.secret) input.placeholder = field.configured ? 'Preferencia guardada; escribe para reemplazar' : 'Usar clave instalada en .env';
+    if (field.secret) input.placeholder = field.configured ? 'Clave configurada; escribe para reemplazar' : 'Sin clave configurada';
+    if (input.tagName === 'SELECT' && input.value === '' && field.value != null) {
+      input.append(new Option(`Revisar valor: ${field.value}`, String(field.value), true, true));
+    }
+    const variable = document.createElement('code');
+    variable.className = 'configuration-variable';
+    variable.textContent = field.variable;
+    const source = document.createElement('p');
+    source.className = 'hint configuration-source';
+    source.textContent = sourceLabels[field.source];
+    const installed = document.createElement('p');
+    installed.className = 'hint configuration-installed';
+    installed.textContent = '.env: ' + (!environment.available ? 'sin consultar' : !field.env_present ? 'sin definir' :
+      field.secret ? field.env_configured ? 'clave configurada (oculta)' : 'vacío' :
+      field.env_value === '' || field.env_value == null ? 'vacío' : String(field.env_value));
     input.addEventListener('input', () => { wrapper.dataset.changed = 'true'; configurationDirty = true; });
     const resetLabel = document.createElement('label');
     resetLabel.className = 'check';
@@ -774,8 +816,8 @@ async function loadConfiguration() {
     reset.type = 'checkbox';
     reset.addEventListener('change', () => { configurationDirty = true; input.disabled = reset.checked; });
     resetLabel.append(reset, ' Usar .env / valor predeterminado');
-    wrapper.append(label, input, resetLabel);
-    container.append(wrapper);
+    wrapper.append(label, variable, input, source, installed, resetLabel);
+    groups.get(field.category).append(wrapper);
   }
   configurationLoaded = true;
   configurationDirty = false;
@@ -787,13 +829,13 @@ $('configuration-form').addEventListener('submit', event => {
   guarded(event.submitter, async () => {
     if (dirty) throw new Error('Guarda primero los ajustes básicos que acabas de cambiar.');
     const values = {}, reset = [];
-    for (const wrapper of $('configuration-fields').children) {
+    for (const wrapper of $('configuration-fields').querySelectorAll('[data-config-key]')) {
       const input = wrapper.querySelector('select, input');
-      if (wrapper.querySelector('input[type="checkbox"]').checked) reset.push(wrapper.dataset.key);
+      if (wrapper.querySelector('input[type="checkbox"]').checked) reset.push(wrapper.dataset.configKey);
       else if (wrapper.dataset.changed === 'true') {
-        values[wrapper.dataset.key] = input.dataset.type === 'bool' ? input.value === 'true' :
+        values[wrapper.dataset.configKey] = input.dataset.type === 'bool' ? input.value === 'true' :
           ['int', 'float'].includes(input.dataset.type) ? (input.value === '' ? null : Number(input.value)) :
-          input.dataset.secret !== 'true' && wrapper.dataset.key !== 'GEMINI_FALLBACK_MODELS' && input.value === '' ? null : input.value;
+          input.dataset.secret !== 'true' && wrapper.dataset.configKey !== 'GEMINI_FALLBACK_MODELS' && input.value === '' ? null : input.value;
       }
     }
     await api('/api/admin/configuration', 'PUT', {values, reset});

@@ -30,7 +30,7 @@ class PortalProfilesTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.database = Path(temp.name) / 'settings.sqlite3'
         self.system = Mock(return_value={'ok': True})
-        self.app = create_app(self.database, self.admin_hash, self.system, self.commercial_hash)
+        self.app = create_app(self.database, self.admin_hash, self.system, self.commercial_hash, environment_path=self.database.parent / '.env')
         self.client = PortalClient(self.app)
         self.csrf = self.client.get('/api/session').json()['csrf']
 
@@ -101,7 +101,7 @@ class PortalProfilesTests(unittest.TestCase):
         self.assertTrue(config.push_to_talk)
         self.assertFalse(config.microphone_enabled)
         self.system.assert_not_called()
-        second = PortalClient(create_app(self.database, self.admin_hash, self.system, self.commercial_hash))
+        second = PortalClient(create_app(self.database, self.admin_hash, self.system, self.commercial_hash, environment_path=self.database.parent / '.env'))
         self.assertEqual(second.get('/api/status').status_code, 401)
         self.assertTrue(load_overrides(self.database)['push_to_talk'])
 
@@ -167,6 +167,72 @@ class PortalProfilesTests(unittest.TestCase):
     def test_disabled_microphone_does_not_resolve_missing_audio_preference(self):
         config = parse_config({'microphone_enabled': False, 'mute': True}, {'ARBY_INPUT_MODE': 'voice'})
         self.assertEqual(apply_selection(config, {'input': {'missing': True}, 'output': None}, devices=[]), {})
+
+    def test_environment_values_are_current_without_runtime_and_grouped(self):
+        target = self.database.parent / '.env'
+        target.write_text('ARBY_EYES=matrix\nARBY_MULTIPLEXING=1\nARBY_MATRIX_BRIGHTNESS=37\nARBY_STRIP=true\nARBY_MIC_GAIN_DB=11\nARBY_SUPPORT=true\nGEMINI_FALLBACK_MODELS=\nARBY_RATE=+8%\nGEMINI_API_KEY=installed-secret\nUNLISTED_SECRET=never-return\n')
+        self.login()
+        response = self.client.get('/api/admin/configuration')
+        data = response.json()
+        fields = {field['key']: field for field in data['fields']}
+        self.assertEqual(fields['matrix_brightness']['value'], 37)
+        self.assertEqual(fields['matrix_brightness']['env_value'], '37')
+        self.assertEqual(fields['matrix_brightness']['category'], 'matrix')
+        self.assertEqual(fields['strip']['category'], 'strip')
+        self.assertEqual(fields['mic_gain_db']['value'], 11)
+        self.assertTrue(fields['ARBY_SUPPORT']['value'])
+        self.assertEqual(fields['GEMINI_FALLBACK_MODELS']['value'], '')
+        self.assertEqual(fields['rate']['value'], '+8%')
+        self.assertTrue(fields['GEMINI_API_KEY']['configured'])
+        self.assertIsNone(fields['GEMINI_API_KEY']['env_value'])
+        self.assertNotIn('installed-secret', response.content.decode())
+        self.assertNotIn('never-return', response.content.decode())
+        self.assertTrue(data['environment']['available'])
+        categories = {group['id'] for group in data['categories']}
+        self.assertTrue(all(field['category'] in categories for field in data['fields']))
+        target.write_text('ARBY_MATRIX_BRIGHTNESS=49\n')
+        self.assertEqual(self.client.get('/api/admin/configuration').json()['fields'][
+            list(fields).index('matrix_brightness')]['value'], 49)
+
+    def test_portal_preference_and_environment_baseline_remain_distinct(self):
+        (self.database.parent / '.env').write_text('ARBY_MATRIX_BRIGHTNESS=37\n')
+        self.login()
+        self.request('/api/admin/configuration', {'values': {'matrix_brightness': 60}}, 'PUT')
+        fields = {field['key']: field for field in self.client.get('/api/admin/configuration').json()['fields']}
+        self.assertEqual(fields['matrix_brightness']['value'], 60)
+        self.assertEqual(fields['matrix_brightness']['env_value'], '37')
+        self.assertEqual(fields['matrix_brightness']['source'], 'portal')
+        data = self.request('/api/admin/configuration', {'reset': ['matrix_brightness']}, 'PUT').json()
+        field = next(field for field in data['fields'] if field['key'] == 'matrix_brightness')
+        self.assertEqual(field['value'], 37)
+        self.assertEqual(field['source'], 'env')
+        self.assertEqual((self.database.parent / '.env').read_text(), 'ARBY_MATRIX_BRIGHTNESS=37\n')
+
+    def test_read_protected_environment_through_fixed_helper(self):
+        self.login()
+        self.system.return_value = {'content': 'ARBY_MATRIX_BRIGHTNESS=41\nGEMINI_API_KEY=protected-secret\n', 'found': True}
+        with patch('portal.configuration.Path.open', side_effect=PermissionError):
+            response = self.client.get('/api/admin/configuration')
+        self.assertEqual(response.status_code, 200)
+        self.system.assert_called_once_with('environment')
+        fields = {field['key']: field for field in response.json()['fields']}
+        self.assertEqual(fields['matrix_brightness']['value'], 41)
+        self.assertNotIn('protected-secret', response.content.decode())
+
+    def test_unavailable_environment_is_reported_without_claiming_file_values(self):
+        self.login()
+        self.system.side_effect = ValueError('helper unavailable')
+        with patch('portal.configuration.Path.open', side_effect=PermissionError):
+            data = self.client.get('/api/admin/configuration').json()
+        self.assertFalse(data['environment']['available'])
+        self.assertTrue(data['environment']['error'])
+        self.assertTrue(all(field['source'] != 'env' for field in data['fields']))
+
+    def test_partial_matrix_edit_uses_installed_wiring_for_validation(self):
+        (self.database.parent / '.env').write_text('ARBY_EYES=matrix\nARBY_MULTIPLEXING=1\nARBY_STRIP=false\n')
+        self.login()
+        response = self.request('/api/admin/configuration', {'values': {'eyes': 'matrix', 'matrix_brightness': 31}}, 'PUT')
+        self.assertEqual(response.status_code, 200, response.content)
 
     def test_extra_preferences_are_loaded_for_runtime_only(self):
         self.login()

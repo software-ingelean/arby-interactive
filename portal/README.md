@@ -100,8 +100,30 @@ el acceso a ese archivo. Está excluido de Git: respáldalo y conserva su propie
 y permisos al cambiar de instalación. La base sigue sin almacenar claves ni
 conversaciones; ese archivo privado sí puede contener claves de proveedores.
 
-El portal no lee ni sobrescribe `.env`. Los valores no secretos instalados aparecen
-mediante la telemetría del runtime; sin telemetría muestra los predeterminados.
+La sección Administración agrupa las opciones en Matriz LED y ojos, Tira LED,
+Micrófono y reconocimiento, Voz y salida de audio, Sensores y push to talk,
+Modelos e IA, y Portal y soporte. Puedes desplegar cada categoría por separado.
+
+El portal lee `.env` cada vez que consultas o recargas Administración y no lo
+sobrescribe. Cada campo muestra el valor declarado en el archivo, conservando
+los valores vacíos y distinguiendo las variables sin definir. El editor indica si
+usa `.env`, un valor predeterminado o una preferencia del portal. Esta lectura no
+depende de la telemetría ni requiere que Arby esté funcionando. Las claves se
+muestran únicamente como configuradas o vacías, sin devolver su contenido.
+Si el archivo no se puede consultar, el panel lo indica explícitamente.
+
+Cuando la cuenta del portal no tiene permiso de lectura, el ayudante consulta el
+`WorkingDirectory` de la unidad fija `arby.service` y lee su `.env`. No acepta rutas
+proporcionadas por el navegador ni modifica permisos. Para habilitar esta lectura
+en una instalación existente, actualiza el ayudante y reinicia el portal desde la
+raíz del repositorio:
+
+```bash
+sudo install -o root -g root -m 644 portal/deploy/arby-system.py /usr/local/libexec/arby-system.py
+sudo systemctl restart arby-portal.service
+```
+
+No cambian las reglas sudoers ni el servicio por esta función.
 Las claves nunca se devuelven al navegador: escribe una nueva para reemplazarla o
 marca **Usar .env / valor predeterminado** para eliminar la preferencia del portal.
 Los campos sin modificar conservan su valor. Las preferencias del portal tienen
@@ -123,8 +145,8 @@ sudo systemctl restart arby-portal.service arby.service
 ```
 
 Conserva los extras que use tu instalación y `--inexact` para no retirar bindings
-locales como `rgbmatrix`. No cambian la unidad ni el ayudante privilegiado por esta
-migración. Define el hash comercial en `/etc/arby/portal.env` antes de reiniciar el
+locales como `rgbmatrix`. La unidad conserva su compatibilidad; para consultar `.env` protegido, actualiza
+el ayudante como se indica arriba. Define el hash comercial en `/etc/arby/portal.env` antes de reiniciar el
 portal si quieres habilitar ambos perfiles. Recarga el navegador. Comprueba que
 comercial no puede acceder a Administración, Conexión ni acciones de la Raspberry,
 y que admin conserva la configuración instalada. La migración del portal no cambia

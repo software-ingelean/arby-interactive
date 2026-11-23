@@ -126,7 +126,7 @@ def system_action(action, **values):
     return payload
 
 
-def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_action, commercial_password_hash=None):
+def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_action, commercial_password_hash=None, environment_path=None):
     database = Path(database)
     initialize(database)
     from libraries.core.arby_visits import initialize as initialize_visits, report, BOGOTA
@@ -357,10 +357,11 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
 
     @route('/api/admin/configuration', ['GET', 'PUT'])
     def configuration(request):
-        from portal.configuration import describe, save_configuration
+        from portal.configuration import PROJECT_ENVIRONMENT, describe, save_configuration
+        installed_path = PROJECT_ENVIRONMENT if environment_path is None else environment_path
         if request.method == 'PUT':
-            save_configuration(body(request), database)
-        return jsonify(describe(database))
+            save_configuration(body(request), database, installed_path, system)
+        return jsonify(describe(database, installed_path, system))
 
     return PortalHandler(patterns)
 

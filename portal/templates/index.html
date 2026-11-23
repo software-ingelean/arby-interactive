@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Arby · Centro de soporte</title>
-  <link rel="stylesheet" href="/static/portal.css">
-  <script src="/static/portal.js?v=django-profiles-1" defer></script>
+  <link rel="stylesheet" href="/static/portal.css?v=admin-categories-2">
+  <script src="/static/portal.js?v=admin-categories-2" defer></script>
 </head>
 <body>
   <section id="login" class="login" hidden>
@@ -167,8 +167,9 @@
           <h2>Configuración completa de Arby</h2>
           <p>Estas preferencias tienen prioridad sobre .env. Guardar no interrumpe la conversación; reinicia Arby para aplicarlas.</p>
           <p class="hint">Push to talk solo guarda la preferencia. El botón físico y su recepción UDP se integrarán después; la escucha actual no cambia.</p>
-          <p class="hint">Las claves no se muestran. Un campo sin modificar conserva su valor. «Usar .env» elimina la preferencia del portal. Los valores instalados se muestran después de recibir telemetría; sin telemetría se muestran los valores predeterminados.</p>
-          <form id="configuration-form"><div id="configuration-fields" class="two-columns"></div><div class="actions"><button type="submit">Guardar configuración admin</button><button id="configuration-reload" type="button" class="secondary">Recargar</button><button id="configuration-apply" type="button" class="secondary">Aplicar y reiniciar Arby</button></div></form>
+          <p class="hint">Las claves no se muestran. Un campo sin modificar conserva su valor. «Usar .env» elimina la preferencia del portal. Cada campo muestra el valor declarado en .env y el origen del ajuste seleccionado. Recarga para consultar los cambios del archivo.</p>
+          <p id="configuration-environment" class="hint" role="status"></p>
+          <form id="configuration-form"><div id="configuration-fields" class="configuration-categories"></div><div class="actions"><button type="submit">Guardar configuración admin</button><button id="configuration-reload" type="button" class="secondary">Recargar</button><button id="configuration-apply" type="button" class="secondary">Aplicar y reiniciar Arby</button></div></form>
         </article>
       </section>
       <footer>Arby · Centro de soporte <span>Conectado al equipo, cerca de las personas.</span></footer>

@@ -234,3 +234,22 @@ footer { display: flex; justify-content: space-between; gap: 15px; color: #8a958
   .login { margin: 24px auto; padding: 28px 24px; }
 }
 @media (prefers-reduced-motion: no-preference) { button, a { transition: background-color .15s, border-color .15s; } }
+
+/* Administrator categories */
+.configuration-categories { display: grid; gap: 16px; margin: 24px 0; }
+.configuration-category { border: 1px solid var(--line); border-radius: 12px; background: #fff; overflow: hidden; }
+.configuration-category > summary { display: flex; align-items: center; gap: 12px; padding: 20px; cursor: pointer; }
+.configuration-category > summary::before { content: '▸'; color: var(--green); }
+.configuration-category[open] > summary::before { content: '▾'; }
+.configuration-category > summary .pill { margin-left: auto; white-space: nowrap; }
+.configuration-description { margin: 0 20px 18px; }
+.configuration-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 0 20px 20px; }
+.configuration-grid .panel { margin: 0; padding: 18px; min-width: 0; box-shadow: none; background: #f8faf6; }
+.configuration-variable { display: block; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; margin: 0 0 10px; }
+.configuration-source { margin: 10px 0 4px; font-weight: 600; }
+.configuration-installed { margin: 0 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .configuration-grid { grid-template-columns: 1fr; padding: 0 12px 12px; }
+  .configuration-category > summary { padding: 16px 12px; flex-wrap: wrap; }
+  .configuration-category > summary .pill { font-size: 10px; }
+}

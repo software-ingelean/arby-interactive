@@ -64,7 +64,7 @@ class VisitsTests(unittest.TestCase):
         from werkzeug.security import generate_password_hash
         self.recorder.begin()
         self.recorder.message()
-        client = PortalClient(create_app(self.db, password_hash=generate_password_hash('test')))
+        client = PortalClient(create_app(self.db, password_hash=generate_password_hash('test'), environment_path=self.db.parent / '.env'))
         for route in ('/api/visits', '/api/visits/export.csv'):
             self.assertEqual(client.get(route).status_code, 401)
         csrf = client.get('/api/session').json()['csrf']
