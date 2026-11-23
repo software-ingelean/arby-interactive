@@ -35,6 +35,11 @@ Ejecuta los comandos desde la raíz del repositorio, no desde `portal/`:
 También puedes descubrir todas las pruebas de esta carpeta con
 `.venv/bin/python -m unittest discover -s portal/tests -t .`.
 
+Estas pruebas usan bases temporales y no necesitan acceder a la base instalada
+`config/arby_settings.sqlite3` ni ejecutarse con `sudo`. Las pruebas del runner
+comparten `tests/runtime_fixture.py`, que también evita consultar dispositivos
+físicos. Los permisos de la instalación se conservan.
+
 La configuración de ejecución, el lector de preferencias privadas y el puente de
 telemetría siguen en `libraries/core/` porque los usa tanto el portal como Arby.
 Los datos siguen en `config/` y el logotipo compartido en `assets/`; la reorganización

@@ -17,6 +17,7 @@ from libraries.core.arby_ambient import AmbientSettings, load_ambient_settings, 
 from libraries.core.arby_support import (SupportBridge, connect, initialize, settings,
                                         save_settings, runtime_status, enqueue, validate_controls, configuration_revision)
 from portal.tests.portal_client import PortalClient
+from tests.runtime_fixture import isolate_runtime
 from portal.server import create_app, system_action
 import run_arby
 
@@ -34,6 +35,7 @@ class SupportTests(unittest.TestCase):
         self.app = create_app(self.database, self.password_hash, self.system)
         self.client = PortalClient(self.app)
         self.csrf = self.client.get('/api/session').json()['csrf']
+        isolate_runtime(self, self.database)
 
     def request(self, url, data=None, method='POST'):
         return self.client.open(url, method=method, json=data or {}, headers={'X-CSRF-Token': self.csrf})

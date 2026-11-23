@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 import run_arby
+from tests.runtime_fixture import isolate_runtime
 from libraries.voice_input.arby_microphone import MicrophoneInput
 
 # Optional voice packages are needed, but PortAudio/hardware are not.
@@ -24,6 +25,9 @@ except ImportError as exc:
 
 
 class VoiceTests(unittest.TestCase):
+    def setUp(self):
+        isolate_runtime(self)
+
     def recognize(self, phrases, *, followup=8, generation=None):
         jobs, stop, delivered = queue.Queue(), threading.Event(), []
         worker = GoogleWorker(jobs, stop, "es-CO", followup,

@@ -11,6 +11,7 @@ from libraries.core.arby_runtime import ArbyRuntime, validate_reply
 from libraries.leds.arby_strip_led import LedStripController, StripConfig
 from libraries.eyes.matrix_output import MatrixOutput
 import run_arby
+from tests.runtime_fixture import isolate_runtime
 from libraries.simulation.arby_memory_pixels import MemoryPixels
 
 
@@ -412,6 +413,7 @@ class StripTests(unittest.TestCase):
 
 class RunnerTests(unittest.TestCase):
     def setUp(self):
+        isolate_runtime(self)
         self.env = patch.dict("os.environ", {}, clear=True)
         self.env.start()
         self.addCleanup(self.env.stop)
