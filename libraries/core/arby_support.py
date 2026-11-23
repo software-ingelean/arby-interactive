@@ -17,16 +17,11 @@ from libraries.core.arby_ambient import (
     DEFAULT_DATABASE, AmbientSettings, AmbientAction, load_ambient_settings, save_ambient_settings,
 )
 
-# Explicit allowlist: hardware wiring and provider credentials stay in .env.
-CONTROLS = {
-    'mute': (bool, None, None),
-    'trill': (bool, None, None),
-    'rate': (str, None, None),
-    'mic_gain_db': (float, -30, 36),
-    'mic_channel': (str, None, None),
-    'matrix_brightness': (int, 1, 100),
-    'strip_brightness': (int, 0, 100),
-}
+# Shared allowlist for non-secret runtime preferences. Provider keys use a private file.
+from libraries.core.arby_config import FIELDS, parse_config
+
+CONTROLS = {key: (spec[0], None, None) for key, spec in FIELDS.items()}
+
 
 
 TESTS = {
@@ -75,10 +70,22 @@ def initialize(database=DEFAULT_DATABASE):
                 id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS support_runtime (
                 id INTEGER PRIMARY KEY CHECK(id=1), updated REAL NOT NULL, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS support_configuration_revision (
+                id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS support_commands (
                 id TEXT PRIMARY KEY, kind TEXT NOT NULL, created REAL NOT NULL,
                 state TEXT NOT NULL, message TEXT NOT NULL);
         ''')
+
+
+def configuration_revision(database=DEFAULT_DATABASE):
+    if not Path(database).exists():
+        return '0'
+    with closing(connect(database)) as db:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE name='support_configuration_revision'").fetchone():
+            return '0'
+        row = db.execute('SELECT value FROM support_configuration_revision WHERE id=1').fetchone()
+    return row['value'] if row else '0'
 
 
 def load_overrides(database=DEFAULT_DATABASE):
@@ -96,19 +103,28 @@ def validate_controls(values):
         raise ValueError('Configuración no permitida.')
     result = {}
     for key, value in values.items():
-        kind, low, high = CONTROLS[key]
+        kind, default, choices = FIELDS[key]
+        if value is None and default is None:
+            result[key] = None
+            continue
         if kind is bool:
             valid = type(value) is bool
         elif kind is str:
-            valid = value in ('left', 'right') if key == 'mic_channel' else (isinstance(value, str) and re.fullmatch(r'[+-]\d{1,3}%', value) and -50 <= int(value[:-1]) <= 100)
+            valid = isinstance(value, str) and len(value) <= 1024 and not any(c in value for c in '\r\n\x00')
         else:
-            valid = type(value) in (int, float) and math.isfinite(value) and low <= value <= high
+            valid = type(value) in (int, float) and math.isfinite(value)
             if kind is int:
                 valid = valid and int(value) == value
-        if not valid:
+        if not valid or choices is not None and value not in choices:
             raise ValueError(f'Valor inválido: {key}.')
-        result[key] = kind(value)
+        result[key] = None if value is None else kind(value)
+    # Validate bounds and combinations against deterministic defaults. Hardware is never opened.
+    validation = {**result, 'eyes': 'none'}
+    parse_config(validation, {})
+    if 'rate' in result and result['rate'] is not None and not (re.fullmatch(r'[+-]\d{1,3}%', result['rate']) and -50 <= int(result['rate'][:-1]) <= 100):
+        raise ValueError('Valor inválido: rate.')
     return result
+
 
 
 def save_settings(payload, database=DEFAULT_DATABASE):
@@ -122,7 +138,7 @@ def save_settings(payload, database=DEFAULT_DATABASE):
     if any(type(value) not in (int, float) for key, value in raw.items() if key not in ('mode', 'phrases_enabled')):
         raise ValueError('Los intervalos deben ser números.')
     ambient = AmbientSettings(**raw)
-    controls = validate_controls(payload['controls'])
+    controls = validate_controls({**load_overrides(database), **payload['controls']})
     audio = validate_selection(payload['audio']) if 'audio' in payload else None
     # One transaction for both the existing ambient singleton and new overrides.
     with closing(connect(database)) as db, db:
@@ -130,6 +146,7 @@ def save_settings(payload, database=DEFAULT_DATABASE):
             gesture_max_seconds=?, invitation_min_seconds=?, invitation_max_seconds=?, phrases_enabled=? WHERE id=1''',
             (ambient.mode, *ambient.gesture_range, *ambient.invitation_range, ambient.phrases_enabled))
         db.execute('INSERT OR REPLACE INTO support_settings VALUES(1, ?)', (json.dumps(controls),))
+        db.execute('INSERT OR REPLACE INTO support_configuration_revision VALUES(1, ?)', (uuid.uuid4().hex,))
         if audio is not None:
             db.execute('INSERT OR REPLACE INTO support_audio_settings VALUES(1, ?)', (json.dumps(audio),))
 

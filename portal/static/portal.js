@@ -2,6 +2,7 @@
 
 const $ = id => document.getElementById(id);
 const views = {
+  configuration: ['Administración de Arby', 'Módulos, voz, modelos y configuración avanzada.'],
   debug: ["Depuración de Arby", "Flujo, sensores y registro de ejecución en tiempo real."],
   visits: ['Visitas de Arby', 'Conversaciones iniciadas durante los eventos.'],
   overview: ['¿Cómo está Arby?', 'Todo lo esencial, de un vistazo.'],
@@ -13,6 +14,8 @@ const views = {
 };
 const componentNames = {trill: 'Sensores Trill', microphone: 'Micrófono', speaker: 'Altavoz', eyes: 'Ojos', strip: 'Tira de luces'};
 const stateLabels = {ready: 'Funcionando', disabled: 'Desactivado', error: 'Con error', unknown: 'Sin comprobar'};
+let currentRole = null;
+let configurationDirty = false, configurationLoaded = false;
 let csrf = '', dirty = false, filled = false, latest = null, timer = null;
 let noticeTimer, refreshing = false, audioLoading = false, audioDevices = [];
 let audioDraft = {input: null, output: null}, audioInventory = null;
@@ -91,6 +94,10 @@ async function api(url, method = 'GET', data, retried = false) {
 }
 
 function showLogin() {
+  configurationDirty = false;
+  configurationLoaded = false;
+  currentRole = null;
+  $('configuration-fields').replaceChildren();
   setMenu(false, false);
   clearInterval(timer);
   $('login').hidden = false;
@@ -98,6 +105,15 @@ function showLogin() {
 }
 
 async function showPortal() {
+  const session = await api('/api/session');
+  csrf = session.csrf;
+  currentRole = session.role;
+  configurationLoaded = false;
+  configurationDirty = false;
+  document.querySelectorAll('[data-admin]').forEach(node => {
+    node.hidden = currentRole !== 'admin';
+    node.querySelectorAll('input, select, button').forEach(input => input.disabled = currentRole !== 'admin');
+  });
   $('login').hidden = true;
   $('portal').hidden = false;
   filled = false;
@@ -113,7 +129,7 @@ async function showPortal() {
 
 function currentView() {
   const value = location.hash.slice(1);
-  return Object.hasOwn(views, value) ? value : 'overview';
+  return Object.hasOwn(views, value) && (currentRole === 'admin' || !['debug', 'network', 'system', 'configuration'].includes(value)) ? value : 'overview';
 }
 
 function navigate() {
@@ -128,8 +144,9 @@ function navigate() {
   document.title = `${views[view][0]} · Arby`;
   $('savebar').hidden = !['audio', 'experience'].includes(view);
   if (!$('portal').hidden) {
+    if (view === 'configuration' && !configurationLoaded) loadConfiguration().catch(error => notice(error.message, true));
     if (view === 'visits') loadVisits().catch(error => { $('visits-summary').textContent = error.message; });
-    if (view === 'audio' && (!audioInventory || Date.now() - audioChecked > 3000)) loadAudio().catch(error => notice(error.message, true));
+    if (currentRole === 'admin' && view === 'audio' && (!audioInventory || Date.now() - audioChecked > 3000)) loadAudio().catch(error => notice(error.message, true));
     if (view === 'network') loadBluetooth(true).catch(error => notice(error.message, true));
     if (view === 'network' && !networkLoaded) $('refresh-network').click();
   }
@@ -304,7 +321,7 @@ async function refresh() {
     pendingLabel();
     if (data.commands[0]) $('test-result').textContent = data.commands[0].message;
     if (currentView() === 'visits') await loadVisits();
-    if (currentView() === 'audio' && Date.now() - audioChecked > 10000) {
+    if (currentRole === 'admin' && currentView() === 'audio' && Date.now() - audioChecked > 10000) {
       await loadAudio().catch(error => { $('audio-discovery').textContent = error.message; });
     }
   } catch (error) {
@@ -409,7 +426,7 @@ $('visits-form').addEventListener('submit', event => {
 $('login-form').addEventListener('submit', event => {
   event.preventDefault();
   guarded(event.submitter, async () => {
-    const result = await api('/api/login', 'POST', {password: $('password').value});
+    const result = await api('/api/login', 'POST', {password: $('password').value, role: $('profile').value});
     $('password').value = '';
     csrf = result.csrf;
     await showPortal();
@@ -447,16 +464,21 @@ $('settings-form').addEventListener('submit', event => {
         mic_channel: $('mic-channel').value, matrix_brightness: value('matrix-brightness'), strip_brightness: value('strip-brightness')},
       audio: audioDraft,
     };
+    if (currentRole === 'comercial') {
+      delete payload.audio;
+      payload.controls = Object.fromEntries(Object.entries(payload.controls).filter(([key]) => ['mute', 'rate', 'matrix_brightness', 'strip_brightness'].includes(key)));
+    }
     await api('/api/settings', 'PUT', payload);
+    configurationLoaded = false;
     dirty = false;
     notice('Ajustes guardados en la Raspberry; se conservan al apagarla. Aplica los cambios cuando Arby esté libre.');
     await refresh();
-    if (currentView() === 'audio') await loadAudio();
+    if (currentRole === 'admin' && currentView() === 'audio') await loadAudio();
   });
 });
 
 async function energyAction(target) {
-  if (dirty && target === 'arby') { notice('Guarda primero los ajustes que acabas de cambiar.', true); return; }
+  if ((dirty || configurationDirty) && target === 'arby') { notice('Guarda primero los ajustes que acabas de cambiar.', true); return; }
   const shutdown = target === 'shutdown';
   const title = shutdown ? 'Apagar la Raspberry' : target === 'arby' ? 'Reiniciar Arby' : 'Reiniciar la Raspberry';
   let description = shutdown ? 'Se cerrarán los servicios y el equipo se apagará. El panel dejará de responder y tendrás que encender la Raspberry físicamente para volver a usarla.' :
@@ -709,4 +731,76 @@ $('debug-pause').addEventListener('click', () => {
   debugPaused = !debugPaused;
   $('debug-pause').textContent = debugPaused ? 'Reanudar registro' : 'Pausar registro';
   if (latest) renderDebug(latest.runtime);
+});
+
+
+const configTitles = {
+  push_to_talk: 'Activar push to talk (integración física pendiente)',
+  microphone_enabled: 'Activar captura del micrófono', trill: 'Activar sensores Trill',
+  strip: 'Activar tira LED', eyes: 'Salida de ojos (none desactiva)',
+  mute: 'Silenciar voz', input_mode: 'Modo de entrada', demo: 'Usar bot de demostración',
+};
+async function loadConfiguration() {
+  const data = await api('/api/admin/configuration');
+  const container = $('configuration-fields');
+  container.replaceChildren();
+  for (const field of data.fields) {
+    const wrapper = document.createElement('fieldset');
+    wrapper.className = 'panel';
+    wrapper.dataset.key = field.key;
+    const label = document.createElement('label');
+    label.textContent = configTitles[field.key] || field.variable;
+    const input = document.createElement(field.choices || field.type === 'bool' ? 'select' : 'input');
+    input.id = `config-${field.key}`;
+    label.htmlFor = input.id;
+    if (field.choices) {
+      for (const value of field.choices) input.append(new Option(value, value));
+    } else if (field.type === 'bool') {
+      input.append(new Option('Desactivado', 'false'), new Option('Activado', 'true'));
+    } else {
+      input.type = field.secret ? 'password' : ['int', 'float'].includes(field.type) ? 'number' : 'text';
+      if (input.type === 'number') input.step = field.type === 'int' ? '1' : 'any';
+      input.autocomplete = 'off';
+      input.maxLength = field.secret ? 4096 : 1024;
+    }
+    input.value = field.secret ? '' : field.value ?? '';
+    input.dataset.type = field.type;
+    input.dataset.secret = String(field.secret);
+    if (field.secret) input.placeholder = field.configured ? 'Preferencia guardada; escribe para reemplazar' : 'Usar clave instalada en .env';
+    input.addEventListener('input', () => { wrapper.dataset.changed = 'true'; configurationDirty = true; });
+    const resetLabel = document.createElement('label');
+    resetLabel.className = 'check';
+    const reset = document.createElement('input');
+    reset.type = 'checkbox';
+    reset.addEventListener('change', () => { configurationDirty = true; input.disabled = reset.checked; });
+    resetLabel.append(reset, ' Usar .env / valor predeterminado');
+    wrapper.append(label, input, resetLabel);
+    container.append(wrapper);
+  }
+  configurationLoaded = true;
+  configurationDirty = false;
+}
+$('configuration-reload').addEventListener('click', () => guarded($('configuration-reload'), loadConfiguration));
+$('configuration-apply').addEventListener('click', () => guarded($('configuration-apply'), () => energyAction('arby')));
+$('configuration-form').addEventListener('submit', event => {
+  event.preventDefault();
+  guarded(event.submitter, async () => {
+    if (dirty) throw new Error('Guarda primero los ajustes básicos que acabas de cambiar.');
+    const values = {}, reset = [];
+    for (const wrapper of $('configuration-fields').children) {
+      const input = wrapper.querySelector('select, input');
+      if (wrapper.querySelector('input[type="checkbox"]').checked) reset.push(wrapper.dataset.key);
+      else if (wrapper.dataset.changed === 'true') {
+        values[wrapper.dataset.key] = input.dataset.type === 'bool' ? input.value === 'true' :
+          ['int', 'float'].includes(input.dataset.type) ? (input.value === '' ? null : Number(input.value)) :
+          input.dataset.secret !== 'true' && wrapper.dataset.key !== 'GEMINI_FALLBACK_MODELS' && input.value === '' ? null : input.value;
+      }
+    }
+    await api('/api/admin/configuration', 'PUT', {values, reset});
+    filled = false;
+    dirty = false;
+    await loadConfiguration();
+    await refresh();
+    notice('Configuración guardada. Reinicia Arby para aplicarla. Push to talk todavía no cambia la captura.');
+  });
 });

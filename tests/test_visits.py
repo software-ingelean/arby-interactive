@@ -59,16 +59,17 @@ class VisitsTests(unittest.TestCase):
             report(self.db, '2026-11-15', '2026-11-13')
 
     def test_authenticated_portal_and_csv_agree(self):
-        from libraries.support.server import create_app
+        from portal.tests.portal_client import PortalClient
+        from portal.server import create_app
         from werkzeug.security import generate_password_hash
         self.recorder.begin()
         self.recorder.message()
-        client = create_app(self.db, password_hash=generate_password_hash('test')).test_client()
+        client = PortalClient(create_app(self.db, password_hash=generate_password_hash('test')))
         for route in ('/api/visits', '/api/visits/export.csv'):
             self.assertEqual(client.get(route).status_code, 401)
-        csrf = client.get('/api/session').json['csrf']
+        csrf = client.get('/api/session').json()['csrf']
         self.assertEqual(client.post('/api/login', json={'password': 'test'}, headers={'X-CSRF-Token': csrf}).status_code, 200)
-        data = client.get('/api/visits').json
+        data = client.get('/api/visits').json()
         rows = list(csv.DictReader(io.StringIO(client.get('/api/visits/export.csv').text)))
         self.assertEqual(len(rows), data['total'])
         self.assertEqual(int(rows[0]['mensajes']), data['messages'])

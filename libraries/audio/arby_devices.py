@@ -175,7 +175,7 @@ def apply_selection(config, selection, *, devices=None, sounddevice=None):
     """Resolve once per startup; never silently switch to an unrelated device."""
     devices = discover_devices() if devices is None else devices
     active = {}
-    if selection['input'] is not None and config.input_mode == 'voice':
+    if selection['input'] is not None and config.input_mode == 'voice' and getattr(config, 'microphone_enabled', True):
         device = find_preferred(selection['input'], 'input', devices)
         if sounddevice is None:
             import sounddevice

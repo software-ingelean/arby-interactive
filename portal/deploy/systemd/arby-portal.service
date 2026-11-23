@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=@PROJECT_DIR@
-ExecStart=@PROJECT_DIR@/.venv/bin/python -m libraries.support.server
+ExecStart=@PROJECT_DIR@/.venv/bin/python -m portal
 User=arby-portal
 Group=arby-support
 UMask=0007

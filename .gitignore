@@ -235,3 +235,7 @@ __marimo__/
 .streamlit/secrets.toml
 # Generated knowledge index; keep it across pulls and git stash -u.
 /libraries/bot/faiss_index/
+
+# Provider credentials managed through the administrator portal.
+/config/portal_environment.json
+/config/.portal-environment-*

@@ -15,8 +15,9 @@ from unittest.mock import Mock, patch
 from werkzeug.security import generate_password_hash
 from libraries.core.arby_ambient import AmbientSettings, load_ambient_settings, save_ambient_settings
 from libraries.core.arby_support import (SupportBridge, connect, initialize, settings,
-                                        save_settings, runtime_status, enqueue, validate_controls)
-from libraries.support.server import create_app, system_action
+                                        save_settings, runtime_status, enqueue, validate_controls, configuration_revision)
+from portal.tests.portal_client import PortalClient
+from portal.server import create_app, system_action
 import run_arby
 
 
@@ -31,9 +32,8 @@ class SupportTests(unittest.TestCase):
         self.database = Path(temp.name) / 'settings.sqlite3'
         self.system = Mock(return_value={'ok': True})
         self.app = create_app(self.database, self.password_hash, self.system)
-        self.app.testing = True
-        self.client = self.app.test_client()
-        self.csrf = self.client.get('/api/session').json['csrf']
+        self.client = PortalClient(self.app)
+        self.csrf = self.client.get('/api/session').json()['csrf']
 
     def request(self, url, data=None, method='POST'):
         return self.client.open(url, method=method, json=data or {}, headers={'X-CSRF-Token': self.csrf})
@@ -41,11 +41,11 @@ class SupportTests(unittest.TestCase):
     def login(self):
         response = self.request('/api/login', {'password': 'support-test'})
         self.assertEqual(response.status_code, 200)
-        self.csrf = response.json['csrf']
+        self.csrf = response.json()['csrf']
 
     def publish(self, **updates):
         snapshot = {'state': 'ready', 'components': {'speaker': {'state': 'unknown'}, 'eyes': {'state': 'ready'}},
-                    'effective': settings(self.database)}
+                    'effective': {**settings(self.database), 'configuration_revision': configuration_revision(self.database)}}
         snapshot.update(updates)
         with closing(connect(self.database)) as db, db:
             db.execute('INSERT OR REPLACE INTO support_runtime VALUES(1,?,?)', (time.time(), json.dumps(snapshot)))
@@ -66,9 +66,9 @@ class SupportTests(unittest.TestCase):
         response = self.client.post('/api/network/connect', json={'ssid': 'Fair', 'password': 'secret'},
                                     headers={'X-CSRF-Token': 'stale-token'})
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.json['code'], 'csrf_mismatch')
+        self.assertEqual(response.json()['code'], 'csrf_mismatch')
         self.system.assert_not_called()
-        info = self.client.get('/api/session').json
+        info = self.client.get('/api/session').json()
         self.assertTrue(info['authenticated'])
         self.csrf = info['csrf']
         self.assertEqual(self.request('/api/network/connect', {'ssid': 'Fair', 'password': 'secret'}).status_code, 200)
@@ -93,13 +93,13 @@ class SupportTests(unittest.TestCase):
     def test_settings_save_without_restarting_and_pending_changes(self):
         self.login()
         self.publish()
-        self.assertFalse(self.client.get('/api/status').json['runtime']['pending_changes'])
+        self.assertFalse(self.client.get('/api/status').json()['runtime']['pending_changes'])
         self.assertEqual(self.request('/api/settings', self.payload(), 'PUT').status_code, 200)
         self.system.assert_not_called()
         self.assertEqual(load_ambient_settings(self.database).mode, 'evento')
-        self.assertTrue(self.client.get('/api/status').json['runtime']['pending_changes'])
+        self.assertTrue(self.client.get('/api/status').json()['runtime']['pending_changes'])
         self.publish()
-        self.assertFalse(self.client.get('/api/status').json['runtime']['pending_changes'])
+        self.assertFalse(self.client.get('/api/status').json()['runtime']['pending_changes'])
 
     def test_invalid_update_is_atomic(self):
         before = settings(self.database)
@@ -115,8 +115,8 @@ class SupportTests(unittest.TestCase):
                 save_settings(invalid, self.database)
         self.assertEqual(settings(self.database), before)
 
-    def test_credentials_and_hardware_keys_cannot_be_saved(self):
-        for key in ('GEMINI_API_KEY', 'strip_gpio', 'voice', '__class__'):
+    def test_credentials_and_unknown_keys_cannot_be_saved_as_controls(self):
+        for key in ('GEMINI_API_KEY', 'strip_gpio', '__class__'):
             with self.assertRaises(ValueError):
                 validate_controls({key: 'secret'})
 
@@ -266,7 +266,7 @@ class SupportTests(unittest.TestCase):
         self.system.assert_called_once_with('arby')
 
     def test_page_and_local_assets(self):
-        for path in ('/', '/static/portal.js', '/static/portal.css'):
+        for path in ('/', '/static/portal.js', '/static/portal.css', '/assets/arby.webp'):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.headers['X-Frame-Options'], 'DENY')
@@ -278,7 +278,7 @@ class SupportTests(unittest.TestCase):
         with patch('libraries.audio.arby_devices.discover_devices', return_value=[]):
             response = self.client.get('/api/audio/devices')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json['devices'], [])
+        self.assertEqual(response.json()['devices'], [])
 
     def test_shutdown_is_authenticated_and_is_not_an_arbitrary_command(self):
         self.assertEqual(self.request('/api/power', {'target': 'shutdown'}).status_code, 401)
@@ -291,7 +291,7 @@ class SupportTests(unittest.TestCase):
     def test_demo_catalog_and_cancel_endpoint(self):
         self.login()
         self.publish()
-        result = self.client.get('/api/status').json
+        result = self.client.get('/api/status').json()
         self.assertIn('light_red', [item['id'] for item in result['tests']])
         enqueue('greeting', self.database)
         self.assertEqual(self.request('/api/tests/cancel').status_code, 202)
@@ -337,7 +337,7 @@ class SupportTests(unittest.TestCase):
         self.assertIn('cancelada', row['message'])
 
     def test_system_failure_has_no_subprocess_output_or_password(self):
-        with patch('libraries.support.server.subprocess.run', return_value=SimpleNamespace(returncode=1, stdout='secret', stderr='password')):
+        with patch('portal.server.subprocess.run', return_value=SimpleNamespace(returncode=1, stdout='secret', stderr='password')):
             with self.assertRaises(ValueError) as caught:
                 system_action('wifi', ssid='fair', password='password')
         self.assertNotIn('password', str(caught.exception))
@@ -370,7 +370,7 @@ class SupportTests(unittest.TestCase):
         self.assertFalse(load_ambient_settings(self.database).phrases_enabled)
 
     def test_bluetooth_error_reaches_portal_without_raw_output(self):
-        with patch('libraries.support.server.subprocess.run', return_value=SimpleNamespace(
+        with patch('portal.server.subprocess.run', return_value=SimpleNamespace(
                 returncode=0, stdout='{"error_code":"bluetooth_auth_failed"}', stderr='private device details')):
             with self.assertRaisesRegex(ValueError, 'rechazó el emparejamiento'):
                 system_action('bluetooth_connect', address='AA:BB:CC:DD:EE:FF')

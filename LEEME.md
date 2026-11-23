@@ -167,4 +167,4 @@ los archivos y `--list-voices` para consultar todas las voces disponibles.
 
 El panel local permite ver componentes, guardar ajustes, probar sonido y ojos,
 configurar Wi-Fi y reiniciar Arby o la Raspberry. Consulta la
-[instalación y uso del portal](docs/PORTAL_SOPORTE.md).
+[instalación y uso del portal](portal/README.md).

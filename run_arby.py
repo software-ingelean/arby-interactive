@@ -1,11 +1,9 @@
 # sudo "$(pwd)/.venv/bin/python" "$(pwd)/run_arby.py"
 """Compose text/microphone input, bot, TTS, eyes and NeoPixel strip."""
 import sys
-from types import SimpleNamespace
 from queue import Empty
 from contextlib import ExitStack
 import logging
-import math
 import os
 import signal
 import sqlite3
@@ -16,6 +14,8 @@ from libraries.audio.arby_devices import load_selection, apply_selection
 from libraries.core.arby_support import SupportBridge, load_overrides, CONTROLS
 from dataclasses import asdict
 from libraries.core.arby_env import load_environment
+from libraries.core.arby_config import parse_config
+from libraries.core.arby_support import configuration_revision
 from libraries.audio.arby_audio_recovery import close_strip_and_recover_audio
 from libraries.simulation.arby_demo_bot import DemoBot
 from libraries.simulation.arby_memory_pixels import MemoryPixels
@@ -32,101 +32,7 @@ _console_output_lock = threading.Lock()
 
 def load_config():
     """Read typed settings from the process environment (including loaded .env)."""
-    fields = {
-        "input_mode": (str, "text", ("text", "voice")),
-        "mic_device": (str, "0", None),
-        "mic_channel": (str, "left", ("left", "right")),
-        "mic_language": (str, "es-CO", None),
-        "mic_gain_db": (float, 6.0, None),
-        "mic_graves": (float, 80.0, None),
-        "mic_agudos": (float, 8000.0, None),
-        "mic_block_ms": (int, 20, None),
-        "mic_queue_blocks": (int, 8, None),
-        "mic_threshold": (float, 0.5, None),
-        "mic_silence_ms": (int, 450, None),
-        "mic_preroll_ms": (int, 320, None),
-        "mic_followup_seconds": (float, 8.0, None),
-        "mic_request_timeout": (float, 10.0, None),
-        "mic_max_utterance_seconds": (float, 15.0, None),
-        "eyes": (str, "preview", ("preview", "none", "matrix")),
-        "strip": (bool, False, None),
-        "strip_gpio": (int, 12, None),
-        "strip_leds": (int, 55, None),
-        "strip_brightness": (int, 20, None),
-        "strip_effect": (str, "solid", ("solid", "breathing", "bounce", "center_out", "ripple")),
-        "multiplexing": (int, None, None),
-        "row_address_type": (int, 0, None),
-        "matrix_brightness": (int, 25, None),
-        "matrix_mapping": (str, "regular", ("regular", "regular-oe5")),
-        "matrix_rgb_sequence": (str, "RGB", ("RGB", "RBG", "GRB", "GBR", "BRG", "BGR")),
-        "slowdown": (int, 2, None),
-        "swap_eyes": (bool, False, None),
-        "model": (str, None, None),
-        "model_cooldown_seconds": (float, 60.0, None),
-        "bot_timeout": (float, 30.0, None),
-        "voice": (str, None, None),
-        "rate": (str, None, None),
-        "pitch": (str, None, None),
-        "ffplay": (str, None, None),
-        "audio_driver": (str, None, None),
-        "audio_device": (str, None, None),
-        "audio_recover_on_exit": (bool, False, None),
-        "mute": (bool, False, None),
-        "demo": (bool, False, None),
-        "trill": (bool, False, None),
-    }
-    overrides = load_overrides()
-    settings = {}
-    for name, (convert, default, choices) in fields.items():
-        variable = "GEMINI_MODEL" if name == "model" else f"ARBY_{name.upper()}"
-        raw = str(overrides[name]).strip() if name in overrides else os.getenv(variable, "").strip()
-        value = default
-        if raw:
-            try:
-                if convert is bool:
-                    if raw.casefold() not in {"true", "false", "1", "0", "yes", "no", "on", "off"}:
-                        raise ValueError("usa true/false, 1/0, yes/no u on/off")
-                    value = raw.casefold() in {"true", "1", "yes", "on"}
-                else:
-                    value = convert(raw)
-                if choices is not None and value not in choices:
-                    raise ValueError(f"opciones: {', '.join(choices)}")
-            except ValueError as exc:
-                raise ValueError(f"{variable}: valor inválido ({exc})") from exc
-        settings[name] = value
-    config = SimpleNamespace(**settings)
-    mic_values = {name[4:]: value for name, value in settings.items() if name.startswith("mic_")}
-    if not all(math.isfinite(v) for v in mic_values.values() if isinstance(v, (int, float))):
-        raise ValueError("Los parámetros ARBY_MIC deben ser finitos.")
-    if (not 0 < config.mic_graves < config.mic_agudos < 24000
-            or not -30 <= config.mic_gain_db <= 36
-            or config.mic_block_ms not in (10, 20, 40)
-            or not 1 <= config.mic_queue_blocks <= 100
-            or not 0 < config.mic_threshold < 1
-            or not 0 < config.mic_silence_ms <= 5000
-            or not 0 <= config.mic_preroll_ms <= 2000
-            or not 0 < config.mic_followup_seconds <= 120
-            or not 0 < config.mic_request_timeout <= 120
-            or not 1 <= config.mic_max_utterance_seconds <= 60):
-        raise ValueError("Revisa los límites de ARBY_MIC en .env.example.")
-    if str(mic_values["device"]).isdigit():
-        mic_values["device"] = int(mic_values["device"])
-    config.microphone = SimpleNamespace(**mic_values)
-    if not 0 < config.model_cooldown_seconds < float("inf"):
-        raise ValueError("ARBY_MODEL_COOLDOWN_SECONDS debe ser positivo y finito.")
-    if not 0 < config.bot_timeout < float("inf"):
-        raise ValueError("ARBY_BOT_TIMEOUT debe ser positivo y finito.")
-    if config.eyes == "matrix" and config.multiplexing is None:
-        raise ValueError("ARBY_MULTIPLEXING es obligatorio en modo matrix; valida el valor sobre tus paneles.")
-    matrix_pins = {4, 7, 8, 9, 10, 11, 17, 18, 22, 23, 24, 25, 27}
-    if config.matrix_mapping == "regular-oe5":
-        matrix_pins = (matrix_pins - {18}) | {5}
-    if config.eyes == "matrix" and config.strip and config.strip_gpio in matrix_pins:
-        raise ValueError("ARBY_STRIP_GPIO coincide con el cableado de las matrices seleccionado.")
-    if config.strip_gpio < 0 or config.strip_leds < 1 or not 0 <= config.strip_brightness <= 100:
-        raise ValueError("Revisa ARBY_STRIP_GPIO (>=0), ARBY_STRIP_LEDS (>0) y ARBY_STRIP_BRIGHTNESS (0–100).")
-    if not 1 <= config.matrix_brightness <= 100:
-        raise ValueError("ARBY_MATRIX_BRIGHTNESS debe estar entre 1 y 100.")
+    config = parse_config(load_overrides(), os.environ)
     config.audio_selection = load_selection()
     config.audio_active = apply_selection(config, config.audio_selection)
     return config
@@ -190,6 +96,7 @@ def main():
     load_environment()
     support = SupportBridge()
     try:
+        applied_revision = configuration_revision(support.database)
         args = load_config()
         strip_config = StripConfig(args.strip_gpio, args.strip_leds,
                                    args.strip_brightness / 100, args.strip_effect)
@@ -205,14 +112,16 @@ def main():
             support.snapshot['effective'] = {
                 'ambient': asdict(ambient_settings),
                 'audio': args.audio_selection,
+                'push_to_talk_pending': args.push_to_talk,
+                'configuration_revision': applied_revision,
                 'controls': {key: (getattr(args, key) if key != 'rate' else args.rate or '+12%') for key in CONTROLS},
             }
             support.snapshot['audio_active'] = args.audio_active
             support.snapshot['capabilities'] = {'eyes': args.eyes != 'none', 'strip': args.strip,
-                                                'microphone': args.input_mode == 'voice', 'speaker': not args.mute}
+                                                'microphone': args.input_mode == 'voice' and args.microphone_enabled, 'speaker': not args.mute}
             support.snapshot['components'] = {
                 'trill': {'state': 'disabled' if not args.trill else 'unknown', 'detail': 'Desactivado.' if not args.trill else 'Pendiente de inicializar.'},
-                'microphone': {'state': 'disabled' if args.input_mode != 'voice' else 'unknown', 'detail': 'Entrada por consola.' if args.input_mode != 'voice' else 'Pendiente de inicializar.'},
+                'microphone': {'state': 'disabled' if (args.input_mode != 'voice' or not args.microphone_enabled) else 'unknown', 'detail': 'Captura desactivada.' if not args.microphone_enabled else 'Entrada por consola.' if args.input_mode != 'voice' else 'Pendiente de inicializar.'},
                 'speaker': {'state': 'disabled' if args.mute else 'unknown', 'detail': 'Voz desactivada.' if args.mute else 'Sin comprobar.'},
                 'eyes': {'state': 'disabled' if args.eyes == 'none' else 'unknown', 'detail': 'Desactivados.' if args.eyes == 'none' else 'Pendientes de inicializar.'},
                 'strip': {'state': 'disabled' if not args.strip else 'unknown', 'detail': 'Simulada.' if not args.strip else 'Pendiente de inicializar.'},
@@ -297,7 +206,7 @@ def main():
                 from libraries.core.arby_visits import VisitRecorder
                 runtime = ArbyRuntime(
                     bot, tts, emotion_colors=palette, debug=support.debug,
-                    visit_recorder=VisitRecorder(support.database) if event_mode and args.input_mode == "voice" and not args.demo else None,
+                    visit_recorder=VisitRecorder(support.database) if event_mode and args.input_mode == "voice" and args.microphone_enabled and not args.demo else None,
                     play_ambient_clip=ambient_audio.play if ambient_audio else None,
                 ).start()
                 clients.pop_all()  # Ownership is now held by the runtime worker.
@@ -306,12 +215,12 @@ def main():
             if touch:
                 support.debug.event("inicio", "Trill activo con respuestas automáticas")
             microphone = None
-            if args.input_mode == "voice":
+            if args.input_mode == "voice" and args.microphone_enabled:
                 from libraries.voice_input.arby_microphone import MicrophoneInput
                 microphone = MicrophoneInput(runtime, args.microphone, stop, input_done)
                 stack.callback(microphone.close)
                 microphone.start()
-            else:
+            elif args.input_mode == "text":
                 reader = threading.Thread(target=_console, args=(runtime, stop, input_done),
                                           name="arby-console", daemon=True)
                 reader.start()
@@ -356,7 +265,7 @@ def main():
                     break
                 stop.wait(max(0, 1/30 - (time.monotonic() - started)))
             _print_events(runtime)
-            if args.input_mode == "voice" and microphone.error is not None:
+            if microphone is not None and microphone.error is not None:
                 raise RuntimeError("Falló la entrada de micrófono; revisa el error anterior.")
     except KeyboardInterrupt:
         stop.set()
