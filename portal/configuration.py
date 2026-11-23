@@ -131,7 +131,7 @@ def describe(database, environment_path=PROJECT_ENVIRONMENT, system=None):
                        'configured': bool(extra.get(key, raw)) if secret else None,
                        'choices': None, 'default': default})
     return {'fields': fields, 'categories': CATEGORIES, 'environment': environment_status,
-            'push_to_talk_implemented': False}
+            'push_to_talk_implemented': True}
 
 
 def save_configuration(payload, database, environment_path=PROJECT_ENVIRONMENT, system=None):

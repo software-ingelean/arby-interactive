@@ -1,4 +1,5 @@
 """Bridge microphone recognition to the shared conversation runtime."""
+import socket
 import threading
 import time
 
@@ -14,6 +15,9 @@ class MicrophoneInput:
         self.input_done = input_done
         self.resume_at = 0.0
         self.error = None
+        self.push_to_talk = getattr(config, "push_to_talk", False)
+        self.udp_socket = None
+        self.udp_thread = None
         self._repeat_index = 0
         self.track_visits = getattr(runtime, "visit_recorder", None) is not None
         self.pipeline = ArbyPipeline(config, on_question=self.submit,
@@ -63,8 +67,36 @@ class MicrophoneInput:
         return pending
 
     def start(self):
+        if self.push_to_talk:
+            self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                self.udp_socket.bind(("0.0.0.0", 5005))
+                self.udp_socket.settimeout(0.2)
+            except Exception:
+                self.udp_socket.close()
+                self.udp_socket = None
+                raise
+            self.udp_thread = threading.Thread(target=self.listen_button, name="arby-push-to-talk", daemon=True)
+            self.udp_thread.start()
         self.thread.start()
         return self
+
+    def listen_button(self):
+        try:
+            while not self.stop.is_set() and not self.pipeline.stop_event.is_set():
+                try:
+                    payload, _ = self.udp_socket.recvfrom(1024)
+                except socket.timeout:
+                    continue
+                if payload.strip() in (b"1", b"\x01"):
+                    self.runtime.interrupt_ambient()
+                    self.pipeline.google_worker.activation_requested.set()
+                    self.trace("Botón UDP recibido", port=5005)
+        except OSError as exc:
+            if not self.stop.is_set() and not self.pipeline.stop_event.is_set():
+                self.error = exc
+                self.runtime.events.put(("error", f"Push to talk UDP: {exc}"))
+                self.stop.set()
 
     def run(self):
         try:
@@ -79,5 +111,9 @@ class MicrophoneInput:
 
     def close(self):
         self.pipeline.close()
+        if self.udp_thread is not None:
+            self.udp_thread.join(timeout=1.0)
+        if self.udp_socket is not None:
+            self.udp_socket.close()
         if self.thread.ident is not None:
             self.thread.join(timeout=2.0)

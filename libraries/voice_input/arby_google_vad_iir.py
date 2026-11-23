@@ -41,7 +41,7 @@ S32_SCALE = 2_147_483_648.0
 
 VAD_FRAME = 512
 VAD_FRAME_BYTES = VAD_FRAME * 2
-CONVERSATION_IDLE_SECONDS = 30.0
+CONVERSATION_IDLE_SECONDS = 60.0
 REPEAT_COOLDOWN_SECONDS = 8.0
 
 
@@ -190,8 +190,12 @@ class GoogleWorker(threading.Thread):
         capture_started_at=None,
         on_conversation_start=None,
         on_conversation_end=None,
+        push_to_talk=False,
     ):
         super().__init__(daemon=True, name="arby-recognition")
+        self.push_to_talk = push_to_talk
+        self.activation_requested = threading.Event()
+        self.conversation_active = threading.Event()
         self.debug = None
         self.jobs = jobs
         self.stop_event = stop_event
@@ -215,6 +219,7 @@ class GoogleWorker(threading.Thread):
 
     def run(self):
         while not self.stop_event.is_set():
+            self._activate_requested()
             # Capture generations invalidate old audio, not an active conversation.
             self._resume_followup()
             self._expire_followup()
@@ -229,6 +234,13 @@ class GoogleWorker(threading.Thread):
                 if self.debug:
                     self.debug.stage("reconocimiento", "Esperando audio", "arby_google_vad_iir.py · GoogleWorker.run → Queue.get")
                 self.jobs.task_done()
+
+    def _activate_requested(self):
+        # Only the recognition worker mutates conversation state.
+        if self.activation_requested.is_set():
+            self.activation_requested.clear()
+            if self.mode == "WAKE":
+                self._listen_for_command()
 
     def _resume_followup(self):
         # Reopen only after playback AND the speaker-tail pause. Slow model calls
@@ -309,14 +321,17 @@ class GoogleWorker(threading.Thread):
                 and self.repeat_prompt is None and self.answer_future is None
                 and (time.monotonic() if at is None else at) >= self.deadline):
             self.mode, self.deadline = 'WAKE', None
+            self.conversation_active.clear()
             if self.on_conversation_end:
                 self.on_conversation_end()
-            log("[CONVERSACION] Terminó la ventana de escucha. Esperando 'Arby'.")
+            log("[CONVERSACION] Terminó la ventana de escucha. " +
+                ("Esperando botón UDP." if self.push_to_talk else "Esperando 'Arby'."))
 
     def _listen_for_command(self):
         if self.mode == 'WAKE' and self.on_conversation_start:
             self.on_conversation_start()
         self.mode = 'COMMAND'
+        self.conversation_active.set()
         self.deadline = time.monotonic() + CONVERSATION_IDLE_SECONDS
         self.last_repeat_at = float('-inf')
         log('[CONVERSACION] Activa durante 60 s; puedes preguntar sin decir Arby.')
@@ -333,6 +348,8 @@ class GoogleWorker(threading.Thread):
         if segment is not None:
             pcm = segment.pcm
         if self.repeat_prompt is not None or self.answer_future is not None:
+            return
+        if self.push_to_talk and self.mode == "WAKE":
             return
         audio = sr.AudioData(pcm, FS_OUT, 2)
         generation = self.generation()
@@ -451,6 +468,7 @@ class ArbyPipeline:
             args.language,
             args.followup_seconds,
             on_question=on_question,
+            push_to_talk=getattr(args, "push_to_talk", False),
             on_conversation_start=on_conversation_start,
             on_conversation_end=on_conversation_end,
             on_unrecognized=on_unrecognized,
@@ -481,8 +499,13 @@ class ArbyPipeline:
                 return None
             return callback()
 
+    def capture_paused(self):
+        return (self.is_paused() or
+                (self.google_worker.push_to_talk
+                 and not self.google_worker.conversation_active.is_set()))
+
     def callback(self, indata, frames, time_info, status):
-        if self.stop_event.is_set() or self.is_paused():
+        if self.stop_event.is_set() or self.capture_paused():
             self.input_level = 0.0
             return
         self.last_audio_at = time.monotonic()
@@ -651,10 +674,11 @@ class ArbyPipeline:
                 callback=self.callback,
             ):
                 self._ready.set()
-                log("[READY] Di 'Arby'.")
+                log("[READY] " + ("Esperando botón UDP en el puerto 5005."
+                                  if self.google_worker.push_to_talk else "Di 'Arby'."))
                 paused = False
                 while not self.stop_event.is_set():
-                    if self.is_paused():
+                    if self.capture_paused():
                         if not paused:
                             self.generation += 1
                         paused = True
@@ -699,7 +723,7 @@ class ArbyPipeline:
                         ).astype("<i2").tobytes()
 
                         with self._activity_lock:
-                            if not self.is_paused():
+                            if not self.capture_paused():
                                 self.process_vad_audio(
                                     pcm16, vad_buffer, preroll, utterance_state,
                                 )

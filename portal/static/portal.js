@@ -735,7 +735,7 @@ $('debug-pause').addEventListener('click', () => {
 
 
 const configTitles = {
-  push_to_talk: 'Activar push to talk (integración física pendiente)',
+  push_to_talk: 'Activar push to talk (botón UDP, puerto 5005)',
   microphone_enabled: 'Activar captura del micrófono', trill: 'Activar sensores Trill',
   strip: 'Activar tira LED', eyes: 'Salida de ojos (none desactiva)',
   mute: 'Silenciar voz', input_mode: 'Modo de entrada', demo: 'Usar bot de demostración',

@@ -131,10 +131,17 @@ prioridad sobre la configuración instalada. Guardar no reinicia nada; usa
 **Aplicar y reiniciar Arby** para aplicarlas. Los ajustes básicos conservan las
 preferencias avanzadas que no están editando.
 
-**Push to talk:** `ARBY_PUSH_TO_TALK` es únicamente una preferencia persistente,
-visible en Administración. Activarla o desactivarla **todavía no cambia la captura**:
-no se ha añadido recepción UDP, hilo del botón físico ni lógica de pulsación.
-Esa integración queda pendiente. No hay botón de hablar en el navegador.
+**Push to talk:** activa `ARBY_PUSH_TO_TALK=true` con entrada `voice` y micrófono
+habilitado, o guarda la opción en Administración y aplica/reinicia Arby.
+Un hilo escucha UDP en `0.0.0.0:5005`: el ESP debe enviar `1` (texto o byte
+binario `0x01`) a la IP de la Raspberry. No hace falta mantener pulsado ni decir
+“Arby”. Antes de pulsar se descartan los bloques de audio y no se generan eventos
+VAD ni solicitudes de reconocimiento. El dispositivo de captura permanece abierto.
+La conversación permite 60 segundos para preguntar; cada respuesta completada
+renueva ese minuto después de reproducir el audio y esperar la pausa contra eco.
+Al vencer la ventana se vuelve a esperar el botón. Pulsaciones durante una
+conversación activa no reinician la sesión. Con la opción desactivada se conserva
+la activación por voz. No hay botón de hablar en el navegador.
 
 Para actualizar desde Flask, respalda `config`, instala las nuevas dependencias
 y reinicia los servicios desde el checkout actualizado de la Raspberry:

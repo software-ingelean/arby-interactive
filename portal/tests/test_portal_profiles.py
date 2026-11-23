@@ -95,7 +95,7 @@ class PortalProfilesTests(unittest.TestCase):
                   'eyes': 'none', 'strip': False, 'mute': True, 'mic_threshold': 0.65}
         result = self.request('/api/admin/configuration', {'values': values}, 'PUT')
         self.assertEqual(result.status_code, 200, result.content)
-        self.assertFalse(result.json()['push_to_talk_implemented'])
+        self.assertTrue(result.json()['push_to_talk_implemented'])
         self.assertEqual(load_overrides(self.database), values)
         config = parse_config(load_overrides(self.database), {'ARBY_INPUT_MODE': 'voice'})
         self.assertTrue(config.push_to_talk)

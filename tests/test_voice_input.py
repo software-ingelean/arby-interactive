@@ -47,6 +47,25 @@ class VoiceTests(unittest.TestCase):
         self.assertFalse(worker.is_alive())
         return delivered
 
+    def test_push_to_talk_blocks_recognition_until_button_and_expires(self):
+        worker = GoogleWorker(queue.Queue(), threading.Event(), 'es-CO', 8,
+                              push_to_talk=True)
+        worker.recognizer.recognize_google = Mock(return_value='¿Cómo estás?')
+        delivered = worker.on_question = Mock()
+        worker._recognize(bytes(1024))
+        worker.recognizer.recognize_google.assert_not_called()
+        with patch('libraries.voice_input.arby_google_vad_iir.time.monotonic', return_value=100):
+            worker.activation_requested.set()
+            worker._activate_requested()
+            self.assertTrue(worker.conversation_active.is_set())
+            self.assertEqual(worker.deadline, 160)
+            worker._recognize(bytes(1024))
+        delivered.assert_called_once_with('¿Cómo estás?')
+        worker._expire_followup(at=160)
+        self.assertFalse(worker.conversation_active.is_set())
+        worker._recognize(bytes(1024))
+        self.assertEqual(worker.recognizer.recognize_google.call_count, 1)
+
     def test_activation_preserves_question(self):
         self.assertEqual(wake_match("¡Arbi! ¿Cuánto es 12 + 3?"),
                          (True, "Cuánto es 12 + 3?"))

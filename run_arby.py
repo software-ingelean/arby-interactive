@@ -112,7 +112,7 @@ def main():
             support.snapshot['effective'] = {
                 'ambient': asdict(ambient_settings),
                 'audio': args.audio_selection,
-                'push_to_talk_pending': args.push_to_talk,
+                'push_to_talk': args.push_to_talk,
                 'configuration_revision': applied_revision,
                 'controls': {key: (getattr(args, key) if key != 'rate' else args.rate or '+12%') for key in CONTROLS},
             }
@@ -217,6 +217,7 @@ def main():
             microphone = None
             if args.input_mode == "voice" and args.microphone_enabled:
                 from libraries.voice_input.arby_microphone import MicrophoneInput
+                args.microphone.push_to_talk = args.push_to_talk
                 microphone = MicrophoneInput(runtime, args.microphone, stop, input_done)
                 stack.callback(microphone.close)
                 microphone.start()
