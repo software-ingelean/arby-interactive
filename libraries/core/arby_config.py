@@ -81,7 +81,7 @@ def parse_config(overrides, environment):
             or not 0 < config.mic_followup_seconds <= 120
             or not 0 < config.mic_request_timeout <= 120
             or not 1 <= config.mic_max_utterance_seconds <= 60):
-        raise ValueError("Revisa los límites de ARBY_MIC en .env.example.")
+        raise ValueError("Revisa los límites de captura en Administración → Micrófono y Captura de audio avanzada.")
     if str(mic_values["device"]).isdigit():
         mic_values["device"] = int(mic_values["device"])
     config.microphone = SimpleNamespace(**mic_values)

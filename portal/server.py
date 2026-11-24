@@ -252,6 +252,8 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
     @route('/api/status', ['GET'])
     def status(request):
         live = runtime_status(database)
+        from libraries.core.arby_configuration import ensure_configuration, PROJECT_ENVIRONMENT
+        ensure_configuration(database, PROJECT_ENVIRONMENT if environment_path is None else environment_path, system)
         saved = settings(database)
         effective = live.get('effective', {})
         from libraries.core.arby_support import configuration_revision
@@ -266,13 +268,9 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
         for command in commands:
             if command['state'] in ('pending', 'running') and time.time() - command['created'] > 30:
                 command.update(state='error', message='Prueba caducada. Comprueba que Arby siga funcionando.')
-        defaults = {'trill': os.getenv('ARBY_TRILL', '').lower() in ('1', 'true', 'yes', 'on'),
-                    'mute': os.getenv('ARBY_MUTE', '').lower() in ('1', 'true', 'yes', 'on'),
-                    'rate': os.getenv('ARBY_RATE') or '+12%',
-                    'mic_gain_db': os.getenv('ARBY_MIC_GAIN_DB') or 6,
-                    'mic_channel': os.getenv('ARBY_MIC_CHANNEL') or 'left',
-                    'matrix_brightness': os.getenv('ARBY_MATRIX_BRIGHTNESS') or 25,
-                    'strip_brightness': os.getenv('ARBY_STRIP_BRIGHTNESS') or 20}
+        from libraries.core.arby_config import FIELDS
+        defaults = {key: spec[1] for key, spec in FIELDS.items()}
+        defaults['rate'] = '+12%'
         if request.session.get('role') == 'comercial':
             live.pop('debug', None)
             live.pop('configuration', None)
@@ -284,6 +282,8 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
 
     @route('/api/settings', ['PUT'])
     def update_settings(request):
+        from libraries.core.arby_configuration import ensure_configuration, PROJECT_ENVIRONMENT
+        ensure_configuration(database, PROJECT_ENVIRONMENT if environment_path is None else environment_path, system)
         payload = body(request)
         if request.session.get('role') == 'comercial':
             if set(payload.get('controls', {})) - COMMERCIAL_CONTROLS or 'audio' in payload:

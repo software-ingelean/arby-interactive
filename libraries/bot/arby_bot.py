@@ -15,14 +15,12 @@ from threading import RLock
 from libraries.audio.arby_recordings import (
     BOT_ERROR, BOT_TRY_LATER, IDENTITY_CHOOSE, IDENTITY_CLARIFY, REPEAT_QUESTION,
 )
-from libraries.core.arby_env import load_environment
 from libraries.bot.arby_knowledge import KnowledgeStore, normalize
 from libraries.core.arby_response import (
     EMOTION_COLORS, MATRIX_STATES, RESPONSE_SCHEMA, clean_for_speech,
     make_reply, make_segment, normalize_reply, parse_reply,
 )
 
-load_environment()
 
 LOGGER = logging.getLogger(__name__)
 BASE_PATH = Path(__file__).resolve().parent

@@ -83,53 +83,51 @@ Puedes generar cada hash con Django, sin imprimir la clave:
 .venv/bin/python -c 'from getpass import getpass; from portal.server import configure_django; configure_django(); from django.contrib.auth.hashers import make_password; print(make_password(getpass("Clave del perfil: ")))'
 ```
 
-La sección **Administración** permite gestionar todas las variables de
-`.env.example`, incluidas las claves de proveedores, y desactivar micrófono,
-Trill, ojos (`ARBY_EYES=none`), tira y voz. Al desactivar el micrófono con
-`ARBY_MICROPHONE_ENABLED=false`, Arby mantiene su proceso sin iniciar captura ni
-abrir la consola; tampoco exige que el micrófono seleccionado esté conectado.
-Las frases periódicas se desactivan desde Experiencia. Para desactivar voz se usa
-`ARBY_MUTE=true`. Mantén `ARBY_INPUT_MODE=voice` en el servicio sin escritorio.
+La sección **Administración** es la única fuente de configuración de Arby.
+Incluye claves del proveedor, modelos, escucha, micrófono, voz, ojos, tira LED,
+sensores y logging. La pantalla muestra un listado compacto `PARÁMETRO = valor`, agrupado por tema
+como el antiguo `.env`. El botón **?** de cada fila abre su explicación, unidades,
+límites y valor predeterminado. En esa ayuda también puedes restablecer el valor o
+borrar una clave; luego guarda los cambios.
 
-Los ajustes no secretos se guardan en `support_settings`; las claves, modelos de
-respaldo y preferencia `ARBY_SUPPORT` se guardan en
-`config/portal_environment.json`, creado atómicamente con permisos `0600`, propiedad
-del usuario del portal. El runtime del servicio ejecutado como root puede leerlo.
-Para ejecución manual usa el mismo usuario propietario o prepara explícitamente
-el acceso a ese archivo. Está excluido de Git: respáldalo y conserva su propietario
-y permisos al cambiar de instalación. La base sigue sin almacenar claves ni
-conversaciones; ese archivo privado sí puede contener claves de proveedores.
+### Migración desde .env
 
-La sección Administración agrupa las opciones en Matriz LED y ojos, Tira LED,
-Micrófono y reconocimiento, Voz y salida de audio, Sensores y push to talk,
-Modelos e IA, y Portal y soporte. Puedes desplegar cada categoría por separado.
+El primer arranque de Arby o la primera consulta de configuración/estado al portal
+importa una sola vez los valores del `.env` instalado. Se conservan los ajustes
+existentes del portal y se importan los que faltan. Si la lectura o validación
+falla, la importación no se marca como completada y se puede reintentar al corregir
+el problema. El archivo original no se modifica ni elimina.
 
-El portal lee `.env` cada vez que consultas o recargas Administración y no lo
-sobrescribe. Cada campo muestra el valor declarado en el archivo, conservando
-los valores vacíos y distinguiendo las variables sin definir. El editor indica si
-usa `.env`, un valor predeterminado o una preferencia del portal. Esta lectura no
-depende de la telemetría ni requiere que Arby esté funcionando. Las claves se
-muestran únicamente como configuradas o vacías, sin devolver su contenido.
-Si el archivo no se puede consultar, el panel lo indica explícitamente.
+Después de la importación, `.env` y las variables del proceso dejan de configurar
+Arby. No es necesario conservar el archivo para arrancar. En instalaciones nuevas
+no necesitas crearlo. **Restablecer valor predeterminado** recupera el valor de
+fábrica; **Borrar clave guardada** elimina esa clave, sin recuperarla del `.env`.
+Los campos sin modificar conservan su valor.
 
-Cuando la cuenta del portal no tiene permiso de lectura, el ayudante consulta el
-`WorkingDirectory` de la unidad fija `arby.service` y lee su `.env`. No acepta rutas
-proporcionadas por el navegador ni modifica permisos. Para habilitar esta lectura
-en una instalación existente, actualiza el ayudante y reinicia el portal desde la
-raíz del repositorio:
+Si el usuario del portal no puede leer el archivo antiguo, el ayudante consulta
+el `WorkingDirectory` de la unidad fija `arby.service` para realizar la importación.
+No acepta rutas del navegador. Actualiza el ayudante si tu instalación es anterior:
 
 ```bash
 sudo install -o root -g root -m 644 portal/deploy/arby-system.py /usr/local/libexec/arby-system.py
 sudo systemctl restart arby-portal.service
 ```
 
-No cambian las reglas sudoers ni el servicio por esta función.
-Las claves nunca se devuelven al navegador: escribe una nueva para reemplazarla o
-marca **Usar .env / valor predeterminado** para eliminar la preferencia del portal.
-Los campos sin modificar conservan su valor. Las preferencias del portal tienen
-prioridad sobre la configuración instalada. Guardar no reinicia nada; usa
-**Aplicar y reiniciar Arby** para aplicarlas. Los ajustes básicos conservan las
-preferencias avanzadas que no están editando.
+### Guardar y aplicar
+
+Guardar no interrumpe la conversación. **Aplicar y reiniciar Arby** inicia el proceso
+con los valores guardados. Mantén entrada **Voz** para el servicio sin escritorio.
+La captura requiere **Habilitar micrófono**; la voz de salida se controla por
+**Silenciar voz de Arby**. Las frases periódicas se ajustan en Experiencia.
+
+Los controles se guardan en `support_settings` dentro de
+`config/arby_settings.sqlite3`; claves y preferencias adicionales se guardan en
+`config/portal_environment.json` con permisos `0600`. El proceso root puede leerlo;
+cuando crea este archivo en una instalación con usuario `arby-portal`, le asigna
+ese propietario para que el portal también pueda gestionarlo. Las claves nunca se
+devuelven al navegador ni se guardan en SQLite. Respalda ambos archivos y conserva
+sus permisos al mover la instalación. Las credenciales de acceso al propio portal
+siguen en `/etc/arby/portal.env` y no se importan desde el `.env` del proyecto.
 
 **Push to talk:** activa `ARBY_PUSH_TO_TALK=true` con entrada `voice` y micrófono
 habilitado, o guarda la opción en Administración y aplica/reinicia Arby.
@@ -189,12 +187,9 @@ que se escucha. Con el proceso detenido o el estado de más de ocho segundos,
 los componentes dejan de mostrarse como operativos.
 
 Guardar no reinicia nada. «Aplicar y reiniciar Arby» interrumpe la conversación,
-libera los recursos y vuelve a iniciar con los ajustes guardados. Esos ajustes
-tienen prioridad sobre `.env` solo para los controles del portal. Los valores instalados de cableado,
-modelos y claves siguen en `.env`; admin puede guardar preferencias que los sustituyan. Sin una selección de audio en el panel, los
-dispositivos conservan los valores de `.env`. Para volver a usar exclusivamente
-los valores del entorno en esos controles, con Arby detenido elimina la fila de
-`support_settings` (no la base de datos completa).
+libera los recursos y vuelve a iniciar con los ajustes guardados en el portal.
+Sin una selección de audio por identidad, se usan los dispositivos configurados
+en Administración. Restablecer un campo recupera el valor predeterminado de Arby.
 
 ## Acceder por todas las IP locales (puerto 8080)
 
@@ -251,7 +246,7 @@ actual de entrada o la ruta ALSA actual para salida:
 - No basta con el controlador: varios adaptadores distintos usan `snd-usb-audio`.
 - Si falta el predeterminado, el panel lo indica y Arby no cambia silenciosamente a
   otro dispositivo. El servicio puede reintentar su arranque hasta que vuelva.
-- Elegir «Usar configuración instalada» restaura la selección de `.env` para ese rol.
+- Elegir «Usar dispositivo de Administración» usa el dispositivo guardado en Administración para ese rol.
 - La resolución se hace al iniciar Arby. Después de cambiar o reconectar hardware,
   usa «Aplicar y reiniciar Arby»; no se reabre el micrófono en medio de una frase.
 
@@ -302,9 +297,9 @@ sudo chmod 660 /home/arley/arby-interactive/config/arby_settings.sqlite3
 ```
 
 Los dos últimos comandos solo aplican si la base ya existe. Si aún no existe,
-el portal la creará con el grupo compartido. No cambies permisos de `.env`
-para dar acceso al portal: el servidor web no necesita leerla. Mantén `.env`
-legible para quien ejecute Arby y fuera del acceso del usuario del portal.
+el portal la creará con el grupo compartido. El `.env` antiguo solo se usa durante
+la migración; no cambies sus permisos para dar acceso al portal. El ayudante puede
+leerlo durante esa importación.
 Las credenciales del portal se configuran aparte.
 
 3. Genera un hash (la clave se solicita sin mostrarla):
@@ -429,7 +424,7 @@ En **Experiencia → Comportamiento**, desmarca **Activar lectura de sensores Tr
 para detener la lectura y las reacciones táctiles. Pulsa **Guardar ajustes** y luego
 **Aplicar y reiniciar Arby**. Con la opción desactivada no se inicializa el lector
 Trill. La preferencia se conserva tras apagar el equipo y prevalece sobre
-`ARBY_TRILL` de `.env`. Para reactivar los sensores, marca la opción, guarda y aplica.
+la preferencia **Habilitar sensor táctil Trill** del portal. Para reactivar los sensores, marca la opción, guarda y aplica.
 
 En **Experiencia → Comportamiento**, **Activar frases periódicas** permite
 habilitar o deshabilitar las frases en ambos modos. Los campos mínimo y máximo
@@ -543,3 +538,8 @@ Al pulsar deben aparecer `Botón UDP recibido`, `[PTT] Activación UDP procesada
 `[VAD] Inicio de voz`, `[VAD] Fin de voz` y `[GOOGLE] Reconocimiento completado`,
 seguidos de las etapas de consulta y reproducción. Los paquetes que no contienen
 `1` o el byte `0x01` se registran como ignorados, sin guardar su contenido.
+
+Usa `ARBY_LOG_LEVEL=WARNING` para mostrar solo advertencias y errores, o
+`ARBY_LOG_LEVEL=OFF` para desactivar el logging de Arby (consola y archivo).
+Configura el nivel en **Administración → Diagnóstico y soporte** y reinicia Arby. La salida directa de otras librerías
+o del servicio puede seguir apareciendo en journal.

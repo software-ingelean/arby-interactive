@@ -32,8 +32,8 @@ _console_output_lock = threading.Lock()
 
 
 def load_config():
-    """Read typed settings from the process environment (including loaded .env)."""
-    config = parse_config(load_overrides(), os.environ)
+    """Read typed settings exclusively from saved portal preferences."""
+    config = parse_config(load_overrides(), {})
     config.audio_selection = load_selection()
     config.audio_active = apply_selection(config, config.audio_selection)
     return config
@@ -92,9 +92,13 @@ def _drain_events(runtime):
 
 def main():
     if len(sys.argv) > 1:
-        print("Arby se configura desde .env; ejecuta sin argumentos. Consulta .env.example.")
+        print("Arby se configura desde el portal; ejecuta sin argumentos.")
         return 2
-    load_environment()
+    try:
+        load_environment()
+    except (ValueError, OSError, sqlite3.Error) as exc:
+        print(f"No se pudo cargar o migrar la configuración del portal: {type(exc).__name__}: {exc}", flush=True)
+        return 2
     configure_logging()
     support = SupportBridge()
     try:
@@ -174,7 +178,7 @@ def main():
                 palette = bot.colors
             else:
                 if not (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")):
-                    raise ValueError("Configura GEMINI_API_KEY antes de ejecutar.")
+                    raise ValueError("Configura GEMINI_API_KEY en Administración del portal antes de ejecutar.")
                 from libraries.bot.arby_bot import ArbyBot, BotConfig, EMOTION_COLORS
                 support.checkpoint("Inicializando ArbyBot", "run_arby.py · main → ArbyBot")
                 bot = ArbyBot(config=BotConfig(

@@ -83,23 +83,25 @@ El aviso sobre `isolcpus=3` es una sugerencia de rendimiento y no causa ese erro
 
 ### Variables de entorno de Arby
 
-Después de `uv sync`, copia `.env.example` a `.env` si aún no existe:
+La configuración de Arby se administra desde **Administración** en el portal local
+(consulta [instalación del portal](portal/README.md)). Configura allí la clave de
+Gemini, la entrada por voz y las salidas de hardware. Guarda y usa
+**Aplicar y reiniciar Arby** para activar los cambios. También puedes ejecutar
+`uv run python main.py` o `uv run python run_arby.py`, sin argumentos.
 
-```bash
-cp .env.example .env
-```
+Al actualizar una instalación, el primer arranque del proceso o la primera consulta
+al portal importa una sola vez los valores del antiguo `.env`. Los ajustes ya
+guardados en el portal tienen prioridad. Una vez completada la importación, Arby
+ignora tanto `.env` como las variables de proceso de esos ajustes. No necesitas
+crear ni mantener `.env` en instalaciones nuevas. `.env.example` queda como
+referencia de migración para instalaciones antiguas.
 
-Edita `.env` y completa `GEMINI_API_KEY` con tu clave. También puedes usar
-`GOOGLE_API_KEY` como alternativa y cambiar `GEMINI_MODEL`.
-Ejecuta Arby con `uv run python main.py` o `uv run python run_arby.py`.
-Ambas entradas cargan el `.env` de la raíz del proyecto, incluso al ejecutar
-desde otro directorio. Las variables que ya existan en el entorno tienen
-prioridad; `GEMINI_MODEL` permite elegir el modelo. `run_arby.py` y `main.py`
-se configuran exclusivamente desde el entorno; consulta `.env.example`.
-
-`.env` está excluido de Git: guarda ahí las claves locales. `.env.example`
-documenta las variables sin incluir secretos. Los archivos de `config/*.json`
-siguen siendo la configuración estructurada de voz y hardware.
+Los ajustes se conservan en `config/arby_settings.sqlite3` y las claves en el archivo
+privado `config/portal_environment.json`. Respalda ambos al mover la instalación.
+El portal explica cada campo y separa los ajustes avanzados de captura y cableado.
+Los archivos de configuración estructurada del sensor y del hardware siguen en
+`config/`. Las credenciales de acceso al portal se mantienen en el servicio,
+separadas de la configuración de Arby.
 
 ```bash
 uv run python -m app.triki_humano_real

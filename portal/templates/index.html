@@ -95,8 +95,8 @@
           <div class="section-title"><h2>Dispositivos predeterminados</h2><button data-admin id="refresh-audio" type="button" class="secondary">↻ Buscar dispositivos</button></div>
           <p class="hint">Para usar un altavoz Bluetooth, conéctalo primero en <a href="#network">Conexión</a> y pulsa Buscar dispositivos. Se muestran las salidas de audio disponibles.</p><p id="audio-discovery" class="hint section-note">Buscando dispositivos de la Raspberry…</p>
           <div class="two-columns">
-            <fieldset data-admin class="panel device-panel"><legend>01 · Micrófono</legend><div class="device-symbol" aria-hidden="true">♫</div><h2>¿Por dónde escucha?</h2><label for="input-device">Dispositivo de entrada</label><select id="input-device"><option value="">Usar configuración instalada</option></select><p id="input-preference" class="device-state">Sin predeterminado seleccionado.</p><p id="input-active" class="hint">En uso: sin confirmar.</p><label for="mic-channel">Canal de captura</label><select id="mic-channel"><option value="left">Izquierdo / mono</option><option value="right">Derecho</option></select><label for="gain">Ganancia del micrófono (dB)</label><input id="gain" type="number" min="-30" max="36" step="0.5" required><p class="hint">Aumenta poco a poco. Mucha ganancia también amplifica el ruido.</p></fieldset>
-            <fieldset class="panel device-panel"><legend>02 · Altavoz</legend><div class="device-symbol" aria-hidden="true">◖</div><h2>¿Por dónde habla?</h2><label data-admin for="output-device">Dispositivo de salida</label><select data-admin id="output-device"><option value="">Usar configuración instalada</option></select><p data-admin id="output-preference" class="device-state">Sin predeterminado seleccionado.</p><p data-admin id="output-active" class="hint">En uso: sin confirmar.</p><label class="check"><input id="voice-on" type="checkbox"> Activar la voz de Arby</label><label for="rate">Velocidad de voz (%)</label><input id="rate" type="number" min="-50" max="100" step="1" required><p class="hint">0 es velocidad normal; un valor mayor hace que hable más rápido.</p></fieldset>
+            <fieldset data-admin class="panel device-panel"><legend>01 · Micrófono</legend><div class="device-symbol" aria-hidden="true">♫</div><h2>¿Por dónde escucha?</h2><label for="input-device">Dispositivo de entrada</label><select id="input-device"><option value="">Usar valor de Administración</option></select><p id="input-preference" class="device-state">Sin predeterminado seleccionado.</p><p id="input-active" class="hint">En uso: sin confirmar.</p><label for="mic-channel">Canal de captura</label><select id="mic-channel"><option value="left">Izquierdo / mono</option><option value="right">Derecho</option></select><label for="gain">Ganancia del micrófono (dB)</label><input id="gain" type="number" min="-30" max="36" step="0.5" required><p class="hint">Aumenta poco a poco. Mucha ganancia también amplifica el ruido.</p></fieldset>
+            <fieldset class="panel device-panel"><legend>02 · Altavoz</legend><div class="device-symbol" aria-hidden="true">◖</div><h2>¿Por dónde habla?</h2><label data-admin for="output-device">Dispositivo de salida</label><select data-admin id="output-device"><option value="">Usar valor de Administración</option></select><p data-admin id="output-preference" class="device-state">Sin predeterminado seleccionado.</p><p data-admin id="output-active" class="hint">En uso: sin confirmar.</p><label class="check"><input id="voice-on" type="checkbox"> Activar la voz de Arby</label><label for="rate">Velocidad de voz (%)</label><input id="rate" type="number" min="-50" max="100" step="1" required><p class="hint">0 es velocidad normal; un valor mayor hace que hable más rápido.</p></fieldset>
           </div>
           <div class="callout"><strong>Una elección que Arby recuerda</strong><p>Se guarda la identidad del equipo, no su posición en la lista. Si cambia de número al reiniciar, Arby vuelve a buscarlo. Si no está conectado, te lo indicará.</p><p class="hint">Sin número de serie se distingue primero por puerto y después por modelo, solo si hay una coincidencia única. Conecta el dispositivo y aplica los ajustes para volver a abrir el audio.</p></div>
           <article class="panel live-audio"><div><h2>¿Está llegando sonido?</h2><p id="audio-mic-activity">Habla cerca del micrófono y observa el nivel.</p></div><meter id="audio-meter" min="0" max="100" value="0">0</meter><a class="text-link" href="#tests">Abrir pruebas ↗</a></article>
@@ -164,18 +164,27 @@
       </section>
       <section data-view="configuration" hidden>
         <article class="panel">
-          <h2>Configuración completa de Arby</h2>
-          <p>Estas preferencias tienen prioridad sobre .env. Guardar no interrumpe la conversación; reinicia Arby para aplicarlas.</p>
-          <p class="hint">Push to talk activa la escucha al recibir 1 por UDP en el puerto 5005. Requiere entrada por voz, micrófono habilitado y reiniciar Arby para aplicar el cambio.</p>
-          <p class="hint">Las claves no se muestran. Un campo sin modificar conserva su valor. «Usar .env» elimina la preferencia del portal. Cada campo muestra el valor declarado en .env y el origen del ajuste seleccionado. Recarga para consultar los cambios del archivo.</p>
+          <h2>Configuración de Arby</h2>
+          <p class="hint">Edita los valores y guarda. Pulsa <strong>?</strong> para consultar qué hace un parámetro.</p>
           <p id="configuration-environment" class="hint" role="status"></p>
-          <form id="configuration-form"><div id="configuration-fields" class="configuration-categories"></div><div class="actions"><button type="submit">Guardar configuración admin</button><button id="configuration-reload" type="button" class="secondary">Recargar</button><button id="configuration-apply" type="button" class="secondary">Aplicar y reiniciar Arby</button></div></form>
+          <form id="configuration-form"><div id="configuration-fields" class="configuration-categories"></div><div class="actions"><button type="submit">Guardar cambios</button><button id="configuration-reload" type="button" class="secondary">Recargar</button><button id="configuration-apply" type="button" class="secondary">Aplicar y reiniciar Arby</button></div></form>
         </article>
       </section>
       <footer>Arby · Centro de soporte <span>Conectado al equipo, cerca de las personas.</span></footer>
     </main>
   </div>
   <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+  <dialog id="configuration-help-dialog" aria-labelledby="configuration-help-title">
+    <h2 id="configuration-help-title"></h2>
+    <code id="configuration-help-variable"></code>
+    <p id="configuration-help-description"></p>
+    <p id="configuration-help-details" class="hint"></p>
+    <div class="actions">
+      <button id="configuration-help-reset" type="button" class="secondary">Restablecer valor predeterminado</button>
+      <form method="dialog"><button value="close">Cerrar</button></form>
+    </div>
+    <p class="hint">Los cambios se aplican al guardar y reiniciar Arby.</p>
+  </dialog>
   <dialog id="confirmation"><form method="dialog"><p class="eyebrow">CONFIRMACIÓN</p><h2 id="confirm-title">Confirmar acción</h2><p id="confirm-text"></p><div class="actions"><button value="cancel" class="secondary">Cancelar</button><button value="ok" id="confirm-ok">Continuar</button></div></form></dialog>
 </body>
 </html>

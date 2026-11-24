@@ -340,7 +340,7 @@ function sameIdentity(left, right) {
 function renderAudio() {
   for (const role of ['input', 'output']) {
     const select = $(`${role}-device`);
-    select.replaceChildren(new Option('Usar configuración instalada', ''));
+    select.replaceChildren(new Option('Usar dispositivo de Administración', ''));
     for (const device of audioDevices.filter(item => item.role === role)) {
       select.add(new Option(`${device.name} · ${device.detail}`, device.id));
     }
@@ -734,90 +734,102 @@ $('debug-pause').addEventListener('click', () => {
 });
 
 
-const configTitles = {
-  push_to_talk: 'Activar push to talk (botón UDP, puerto 5005)',
-  microphone_enabled: 'Activar captura del micrófono', trill: 'Activar sensores Trill',
-  strip: 'Activar tira LED', eyes: 'Salida de ojos (none desactiva)',
-  mute: 'Silenciar voz', input_mode: 'Modo de entrada', demo: 'Usar bot de demostración',
-};
+function showConfigurationHelp(field, row, input) {
+  $('configuration-help-title').textContent = field.label;
+  $('configuration-help-variable').textContent = field.variable;
+  $('configuration-help-description').textContent = field.description;
+  const details = [];
+  if (field.unit) details.push(`Unidad: ${field.unit}`);
+  if (field.min != null) details.push(`Mínimo: ${field.min}`);
+  if (field.max != null) details.push(`Máximo: ${field.max}`);
+  if (!field.secret) {
+    const value = field.default == null || field.default === '' ? 'Automático' :
+      (field.choice_labels[String(field.default)] || String(field.default));
+    details.push(`Predeterminado: ${value}`);
+  }
+  details.push(field.source === 'portal' ? 'Origen: guardado en el portal' : 'Origen: valor predeterminado');
+  $('configuration-help-details').textContent = details.join(' · ');
+  const reset = $('configuration-help-reset');
+  const updateReset = () => {
+    reset.textContent = row.dataset.reset === 'true' ? 'Conservar valor anterior' :
+      field.secret ? 'Borrar clave guardada' : 'Restablecer valor predeterminado';
+  };
+  updateReset();
+  reset.onclick = () => {
+    row.dataset.reset = String(row.dataset.reset !== 'true');
+    input.disabled = row.dataset.reset === 'true';
+    row.classList.toggle('configuration-reset', input.disabled);
+    configurationDirty = true;
+    updateReset();
+    $('configuration-help-dialog').close();
+  };
+  $('configuration-help-dialog').showModal();
+}
+
 async function loadConfiguration() {
   const data = await api('/api/admin/configuration');
   const container = $('configuration-fields');
   container.replaceChildren();
-  const environment = data.environment;
-  $('configuration-environment').textContent = environment.available ?
-    environment.found ? 'Valores leídos de .env. Las preferencias del portal se indican en cada campo.' :
-      'No hay archivo .env: se muestran las preferencias del portal y los valores predeterminados.' : environment.error;
-  $('configuration-environment').classList.toggle('error', !environment.available);
+  $('configuration-environment').textContent = '';
   const groups = new Map();
-  for (const [index, category] of data.categories.entries()) {
-    const section = document.createElement('details');
+  for (const category of data.categories) {
+    const section = document.createElement('section');
     section.className = 'configuration-category';
-    section.open = index === 0;
-    const summary = document.createElement('summary');
-    const title = document.createElement('strong');
-    title.textContent = category.label;
-    const count = document.createElement('span');
-    count.className = 'pill';
-    count.textContent = `${data.fields.filter(field => field.category === category.id).length} opciones`;
-    summary.append(title, count);
-    const description = document.createElement('p');
-    description.className = 'hint configuration-description';
-    description.textContent = category.description;
-    const grid = document.createElement('div');
-    grid.className = 'configuration-grid';
-    section.append(summary, description, grid);
+    const title = document.createElement('h3');
+    title.textContent = `# ${category.label}`;
+    section.append(title);
     container.append(section);
-    groups.set(category.id, grid);
+    groups.set(category.id, section);
   }
-  const sourceLabels = {portal: 'Preferencia del portal', env: 'Valor de .env',
-    default: 'Valor predeterminado', runtime: 'Última ejecución; .env sin consultar'};
   for (const field of data.fields) {
-    const wrapper = document.createElement('fieldset');
-    wrapper.className = 'panel';
-    wrapper.dataset.configKey = field.key;
+    const row = document.createElement('div');
+    row.className = 'configuration-row';
+    row.dataset.configKey = field.key;
     const label = document.createElement('label');
-    label.textContent = configTitles[field.key] || field.variable;
+    label.className = 'configuration-key';
+    label.textContent = field.variable;
     const input = document.createElement(field.choices || field.type === 'bool' ? 'select' : 'input');
     input.id = `config-${field.key}`;
     label.htmlFor = input.id;
     if (field.choices) {
       for (const value of field.choices) input.append(new Option(value, value));
     } else if (field.type === 'bool') {
-      input.append(new Option('Desactivado', 'false'), new Option('Activado', 'true'));
+      input.append(new Option('false', 'false'), new Option('true', 'true'));
     } else {
       input.type = field.secret ? 'password' : ['int', 'float'].includes(field.type) ? 'number' : 'text';
       if (input.type === 'number') input.step = field.type === 'int' ? '1' : 'any';
+      if (field.min != null) input.min = field.min;
+      if (field.max != null) input.max = field.max;
       input.autocomplete = 'off';
       input.maxLength = field.secret ? 4096 : 1024;
+      input.placeholder = 'Predeterminado';
     }
     input.value = field.secret ? '' : field.value ?? '';
     input.dataset.type = field.type;
     input.dataset.secret = String(field.secret);
-    if (field.secret) input.placeholder = field.configured ? 'Clave configurada; escribe para reemplazar' : 'Sin clave configurada';
+    if (field.secret) input.placeholder = field.configured ? 'Configurada (sin cambios)' : 'Sin clave';
     if (input.tagName === 'SELECT' && input.value === '' && field.value != null) {
-      input.append(new Option(`Revisar valor: ${field.value}`, String(field.value), true, true));
+      input.append(new Option(`Revisar: ${field.value}`, String(field.value), true, true));
     }
-    const variable = document.createElement('code');
-    variable.className = 'configuration-variable';
-    variable.textContent = field.variable;
-    const source = document.createElement('p');
-    source.className = 'hint configuration-source';
-    source.textContent = sourceLabels[field.source];
-    const installed = document.createElement('p');
-    installed.className = 'hint configuration-installed';
-    installed.textContent = '.env: ' + (!environment.available ? 'sin consultar' : !field.env_present ? 'sin definir' :
-      field.secret ? field.env_configured ? 'clave configurada (oculta)' : 'vacío' :
-      field.env_value === '' || field.env_value == null ? 'vacío' : String(field.env_value));
-    input.addEventListener('input', () => { wrapper.dataset.changed = 'true'; configurationDirty = true; });
-    const resetLabel = document.createElement('label');
-    resetLabel.className = 'check';
-    const reset = document.createElement('input');
-    reset.type = 'checkbox';
-    reset.addEventListener('change', () => { configurationDirty = true; input.disabled = reset.checked; });
-    resetLabel.append(reset, ' Usar .env / valor predeterminado');
-    wrapper.append(label, variable, input, source, installed, resetLabel);
-    groups.get(field.category).append(wrapper);
+    input.addEventListener('input', () => {
+      row.dataset.changed = 'true';
+      row.classList.add('configuration-changed');
+      configurationDirty = true;
+    });
+    const equals = document.createElement('span');
+    equals.className = 'configuration-equals';
+    equals.textContent = '=';
+    equals.setAttribute('aria-hidden', 'true');
+    const help = document.createElement('button');
+    help.type = 'button';
+    help.className = 'configuration-help-button secondary';
+    help.textContent = '?';
+    help.title = `Consultar ${field.variable}`;
+    help.setAttribute('aria-label', `Qué hace ${field.variable}`);
+    help.setAttribute('aria-haspopup', 'dialog');
+    help.addEventListener('click', () => showConfigurationHelp(field, row, input));
+    row.append(label, equals, input, help);
+    groups.get(field.category).append(row);
   }
   configurationLoaded = true;
   configurationDirty = false;
@@ -831,11 +843,11 @@ $('configuration-form').addEventListener('submit', event => {
     const values = {}, reset = [];
     for (const wrapper of $('configuration-fields').querySelectorAll('[data-config-key]')) {
       const input = wrapper.querySelector('select, input');
-      if (wrapper.querySelector('input[type="checkbox"]').checked) reset.push(wrapper.dataset.configKey);
+      if (wrapper.dataset.reset === 'true') reset.push(wrapper.dataset.configKey);
       else if (wrapper.dataset.changed === 'true') {
         values[wrapper.dataset.configKey] = input.dataset.type === 'bool' ? input.value === 'true' :
           ['int', 'float'].includes(input.dataset.type) ? (input.value === '' ? null : Number(input.value)) :
-          input.dataset.secret !== 'true' && wrapper.dataset.configKey !== 'GEMINI_FALLBACK_MODELS' && input.value === '' ? null : input.value;
+          input.dataset.secret !== 'true' && !['GEMINI_FALLBACK_MODELS', 'ARBY_LOG_FILE'].includes(wrapper.dataset.configKey) && input.value === '' ? null : input.value;
       }
     }
     await api('/api/admin/configuration', 'PUT', {values, reset});
@@ -843,6 +855,6 @@ $('configuration-form').addEventListener('submit', event => {
     dirty = false;
     await loadConfiguration();
     await refresh();
-    notice('Configuración guardada. Reinicia Arby para aplicarla. Push to talk usa el botón UDP en el puerto 5005.');
+    notice('Configuración guardada. Usa «Aplicar y reiniciar Arby» para activar los cambios.');
   });
 });
