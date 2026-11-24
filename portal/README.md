@@ -531,3 +531,15 @@ Esperar solicitudes sin trabajo pendiente es normal y no dispara esa alerta.
 La consola conserva respuestas y errores. Los mensajes habituales del pipeline
 de voz pasan al nivel DEBUG de Python; las advertencias de captura y errores de
 reconocimiento permanecen visibles.
+
+**Diagnóstico del proceso:** Arby registra automáticamente en `logs/arby.log`
+(relativo al proyecto) y en stderr, con fecha, nivel e hilo. Conserva tres archivos
+rotados de hasta 5 MB además del actual. Puedes cambiar la ruta con `ARBY_LOG_FILE`.
+Para seguirlo: `tail -F logs/arby.log`; instalado como servicio:
+`sudo journalctl -u arby -f`. Si el archivo no se puede abrir, el error aparece en
+consola y el proceso continúa registrando allí.
+
+Al pulsar deben aparecer `Botón UDP recibido`, `[PTT] Activación UDP procesada`,
+`[VAD] Inicio de voz`, `[VAD] Fin de voz` y `[GOOGLE] Reconocimiento completado`,
+seguidos de las etapas de consulta y reproducción. Los paquetes que no contienen
+`1` o el byte `0x01` se registran como ignorados, sin guardar su contenido.

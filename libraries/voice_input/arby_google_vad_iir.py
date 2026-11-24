@@ -51,7 +51,7 @@ def log(*args):
     if any(marker in message for marker in ('[WARN]', '[ALSA]', 'Error:', 'Error de servicio/red:', 'No se pudo')):
         logger.warning('%s', message)
     else:
-        logger.debug('%s', message)
+        logger.log(logging.DEBUG if '[PERF]' in message else logging.INFO, '%s', message)
 
 
 def input_layout(sd, device, channel):
@@ -240,7 +240,10 @@ class GoogleWorker(threading.Thread):
         if self.activation_requested.is_set():
             self.activation_requested.clear()
             if self.mode == "WAKE":
+                log("[PTT] Activación UDP procesada; abriendo escucha.")
                 self._listen_for_command()
+            else:
+                log("[PTT] Pulsación recibida con conversación activa.")
 
     def _resume_followup(self):
         # Reopen only after playback AND the speaker-tail pause. Slow model calls
@@ -366,7 +369,7 @@ class GoogleWorker(threading.Thread):
             if not text.strip():
                 raise sr.UnknownValueError()
             elapsed = time.perf_counter() - start
-            log(f"[GOOGLE] {text} | {elapsed:.2f}s")
+            log(f"[GOOGLE] Reconocimiento completado: {len(text)} caracteres | {elapsed:.2f}s")
 
         except sr.UnknownValueError:
             elapsed = time.perf_counter() - start
@@ -678,6 +681,8 @@ class ArbyPipeline:
                                   if self.google_worker.push_to_talk else "Di 'Arby'."))
                 paused = False
                 while not self.stop_event.is_set():
+                    if not self.google_worker.is_alive():
+                        raise RuntimeError("El hilo de reconocimiento se detuvo inesperadamente")
                     if self.capture_paused():
                         if not paused:
                             self.generation += 1

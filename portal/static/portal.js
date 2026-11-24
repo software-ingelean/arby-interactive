@@ -843,6 +843,6 @@ $('configuration-form').addEventListener('submit', event => {
     dirty = false;
     await loadConfiguration();
     await refresh();
-    notice('Configuración guardada. Reinicia Arby para aplicarla. Push to talk todavía no cambia la captura.');
+    notice('Configuración guardada. Reinicia Arby para aplicarla. Push to talk usa el botón UDP en el puerto 5005.');
   });
 });

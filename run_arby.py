@@ -13,6 +13,7 @@ import time
 from libraries.audio.arby_devices import load_selection, apply_selection
 from libraries.core.arby_support import SupportBridge, load_overrides, CONTROLS
 from dataclasses import asdict
+from libraries.core.arby_logging import configure_logging
 from libraries.core.arby_env import load_environment
 from libraries.core.arby_config import parse_config
 from libraries.core.arby_support import configuration_revision
@@ -94,6 +95,7 @@ def main():
         print("Arby se configura desde .env; ejecuta sin argumentos. Consulta .env.example.")
         return 2
     load_environment()
+    configure_logging()
     support = SupportBridge()
     try:
         applied_revision = configuration_revision(support.database)
@@ -102,9 +104,12 @@ def main():
                                    args.strip_brightness / 100, args.strip_effect)
     except (ValueError, OSError, sqlite3.Error) as exc:
         support.finish("error")
+        logging.getLogger("arby").exception("Configuración inválida")
         print(f"Configuración inválida: {exc}")
         return 2
-    logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
+    logging.getLogger("arby").info("Configuración: entrada=%s, micrófono=%s, push_to_talk=%s", args.input_mode, args.microphone_enabled, args.push_to_talk)
+    if args.push_to_talk and (args.input_mode != "voice" or not args.microphone_enabled):
+        logging.getLogger("arby").warning("Push to talk requiere ARBY_INPUT_MODE=voice y ARBY_MICROPHONE_ENABLED=true")
     stop, input_done = threading.Event(), threading.Event()
     try:
         with ExitStack() as stack:
@@ -272,6 +277,7 @@ def main():
         stop.set()
     except Exception as exc:
         support.finish("error")
+        logging.getLogger("arby").exception("No se pudo ejecutar Arby")
         print(f"No se pudo ejecutar Arby: {type(exc).__name__}: {exc}")
         return 1
     support.finish("stopped")

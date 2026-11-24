@@ -1,4 +1,5 @@
 """Bridge microphone recognition to the shared conversation runtime."""
+import logging
 import socket
 import threading
 import time
@@ -31,6 +32,8 @@ class MicrophoneInput:
 
     def trace(self, message, **details):
         debug = getattr(self.runtime, 'debug', None)
+        if not debug:
+            logging.getLogger(__name__).info("%s %s", message, details or "")
         if debug:
             debug.event('microfono', message, **details)
 
@@ -73,9 +76,11 @@ class MicrophoneInput:
                 self.udp_socket.bind(("0.0.0.0", 5005))
                 self.udp_socket.settimeout(0.2)
             except Exception:
+                logging.getLogger(__name__).exception("No se pudo iniciar push to talk UDP en 0.0.0.0:5005")
                 self.udp_socket.close()
                 self.udp_socket = None
                 raise
+            self.trace("Escuchando botón UDP", address="0.0.0.0", port=5005)
             self.udp_thread = threading.Thread(target=self.listen_button, name="arby-push-to-talk", daemon=True)
             self.udp_thread.start()
         self.thread.start()
@@ -85,15 +90,18 @@ class MicrophoneInput:
         try:
             while not self.stop.is_set() and not self.pipeline.stop_event.is_set():
                 try:
-                    payload, _ = self.udp_socket.recvfrom(1024)
+                    payload, sender = self.udp_socket.recvfrom(1024)
                 except socket.timeout:
                     continue
                 if payload.strip() in (b"1", b"\x01"):
                     self.runtime.interrupt_ambient()
                     self.pipeline.google_worker.activation_requested.set()
-                    self.trace("Botón UDP recibido", port=5005)
+                    self.trace("Botón UDP recibido", port=5005, sender=sender[0])
+                else:
+                    self.trace("Paquete UDP ignorado: se esperaba 1 o 0x01", bytes=len(payload), sender=sender[0])
         except OSError as exc:
             if not self.stop.is_set() and not self.pipeline.stop_event.is_set():
+                logging.getLogger(__name__).exception("Falló el receptor UDP")
                 self.error = exc
                 self.runtime.events.put(("error", f"Push to talk UDP: {exc}"))
                 self.stop.set()
@@ -102,6 +110,7 @@ class MicrophoneInput:
         try:
             self.pipeline.run()
         except Exception as exc:
+            logging.getLogger(__name__).exception("Falló la entrada de micrófono")
             self.error = exc
             self.trace("Entrada de audio fallida", error=type(exc).__name__)
             self.runtime.events.put(("error", f"Micrófono: {type(exc).__name__}: {exc}"))

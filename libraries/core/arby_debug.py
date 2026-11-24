@@ -1,6 +1,7 @@
 """Bounded operational trace: never stores speech, prompts or credentials."""
 from collections import deque
 from pathlib import Path
+import logging
 import sys
 import threading
 import time
@@ -14,6 +15,8 @@ class DebugTrace:
         self._sequence = 0
 
     def event(self, source, message, level='info', **details):
+        logging.getLogger("libraries.trace." + source).log(
+            getattr(logging, level.upper(), logging.INFO), "%s %s", message, details or "")
         with self._lock:
             self._sequence += 1
             self._events.append(dict(id=self._sequence, at=time.time(), source=source,
