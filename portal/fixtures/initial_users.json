@@ -1,0 +1,50 @@
+[
+  {
+    "model": "auth.group",
+    "pk": 1,
+    "fields": {
+      "name": "Admin",
+      "permissions": []
+    }
+  },
+  {
+    "model": "auth.group",
+    "pk": 2,
+    "fields": {
+      "name": "Comercial",
+      "permissions": []
+    }
+  },
+  {
+    "model": "auth.user",
+    "pk": 1,
+    "fields": {
+      "username": "admin",
+      "password": "pbkdf2_sha256$1000000$GyxSsHlERx0FdpHsx5gjsE$ypay78aSTAaOqxTz1tTOXvefV54hGAvla9LEWBfmSVw=",
+      "is_active": true,
+      "is_staff": false,
+      "is_superuser": false,
+      "groups": [
+        1
+      ],
+      "user_permissions": [],
+      "date_joined": "2026-11-24T00:00:00Z"
+    }
+  },
+  {
+    "model": "auth.user",
+    "pk": 2,
+    "fields": {
+      "username": "comercial",
+      "password": "pbkdf2_sha256$1000000$IR4m06oMVDb7aZUNdYqdmt$KCo6dkortFGwXBi/mFRP1lVDFyNCT4K6rMotpDIiQ60=",
+      "is_active": true,
+      "is_staff": false,
+      "is_superuser": false,
+      "groups": [
+        2
+      ],
+      "user_permissions": [],
+      "date_joined": "2026-11-24T00:00:00Z"
+    }
+  }
+]

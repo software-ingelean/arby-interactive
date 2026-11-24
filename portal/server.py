@@ -14,8 +14,6 @@ import json
 from functools import wraps
 from types import ModuleType
 
-from werkzeug.security import check_password_hash
-
 from libraries.core.arby_ambient import DEFAULT_DATABASE
 from libraries.audio.arby_devices import inventory, load_selection
 from libraries.core.arby_support import TESTS, initialize, settings, save_settings, runtime_status, enqueue, connect
@@ -26,7 +24,6 @@ from django.middleware.csrf import get_token, rotate_token
 from django.shortcuts import render
 from django.urls import path
 from django.views.decorators.http import require_http_methods
-from django.contrib.auth.hashers import check_password
 
 
 def jsonify(*args, **kwargs):
@@ -56,7 +53,9 @@ def configure_django():
         django_settings.configure(
             SECRET_KEY=secrets.token_hex(32), DEBUG=False, ALLOWED_HOSTS=['*'],
             ROOT_URLCONF=__name__,
-            INSTALLED_APPS=[],
+            INSTALLED_APPS=['django.contrib.contenttypes', 'django.contrib.auth'],
+            DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
+            USE_TZ=True,
             MIDDLEWARE=['portal.server.PortalHeaders',
                         'django.contrib.sessions.middleware.SessionMiddleware',
                         'django.middleware.csrf.CsrfViewMiddleware'],
@@ -134,9 +133,21 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
     configure_django()
     patterns = []
     password_hash = password_hash or os.getenv('ARBY_PORTAL_PASSWORD_HASH')
-    if not password_hash:
-        raise ValueError('Configura ARBY_PORTAL_PASSWORD_HASH antes de iniciar el portal.')
     commercial_password_hash = commercial_password_hash or os.getenv('ARBY_PORTAL_COMMERCIAL_PASSWORD_HASH')
+    from portal.accounts import initialize_accounts, role_for, verify_password
+    from django.contrib.auth.models import User, Group
+    from django.db import transaction
+    from django.contrib.auth.hashers import make_password
+    account_db = initialize_accounts(database, password_hash, commercial_password_hash)
+
+    def current_user(request):
+        user = User.objects.using(account_db).filter(pk=request.session.get('user_id')).first()
+        if not user or not role_for(user, account_db) or request.session.get('password_version') != user.password:
+            request.session.pop('role', None)
+            return None
+        request.session['role'] = role_for(user, account_db)
+        return user
+
     attempts, login_lock = {}, threading.Lock()
 
     def route(url, methods):
@@ -144,6 +155,7 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
             @wraps(view)
             def dispatch(request, **kwargs):
                 if url.startswith('/api/') and url not in ('/api/session', '/api/login'):
+                    current_user(request)
                     role = request.session.get('role')
                     if role not in ('admin', 'comercial'):
                         return JsonResponse({'error': 'Introduce la clave de soporte.'}, status=401)
@@ -216,6 +228,7 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
 
     @route('/api/session', ['GET'])
     def session_info(request):
+        current_user(request)
         return jsonify(authenticated=bool(request.session.get('role')), role=request.session.get('role'), csrf=get_token(request))
 
     @route('/api/login', ['POST'])
@@ -231,15 +244,15 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
                 return jsonify(error='Demasiados intentos. Espera un minuto.'), 429
             attempts.setdefault(key, []).append(now)
         data = body(request)
-        password, role = data.get('password', ''), data.get('role', 'admin')
-        chosen_hash = {'admin': password_hash, 'comercial': commercial_password_hash}.get(role) if isinstance(role, str) else None
-        valid = False
-        if chosen_hash and isinstance(password, str):
-            valid = (check_password_hash(chosen_hash, password) if chosen_hash.startswith(('scrypt:', 'pbkdf2:'))
-                     else check_password(password, chosen_hash))
-        if not valid:
-            return jsonify(error='Clave incorrecta.'), 401
+        password = data.get('password', '')
+        username = data.get('username', data.get('role', 'admin'))
+        user = User.objects.using(account_db).filter(username=username).first() if isinstance(username, str) else None
+        role = role_for(user, account_db)
+        if not role or not isinstance(password, str) or not verify_password(user, password):
+            return jsonify(error='Usuario o clave incorrectos.'), 401
         request.session.flush()
+        request.session['user_id'] = user.pk
+        request.session['password_version'] = user.password
         request.session['role'] = role
         rotate_token(request)
         return jsonify(role=role, csrf=get_token(request))
@@ -362,6 +375,40 @@ def create_app(database=DEFAULT_DATABASE, password_hash=None, system=system_acti
         if request.method == 'PUT':
             save_configuration(body(request), database, installed_path, system)
         return jsonify(describe(database, installed_path, system))
+
+    @route('/api/admin/users', ['GET', 'POST', 'PUT'])
+    def users(request):
+        if request.method != 'GET':
+            data = body(request)
+            username, role = data.get('username'), data.get('role')
+            password, active = data.get('password', ''), data.get('active', True)
+            if not isinstance(username, str) or not username or len(username) > 150 or role not in ('admin', 'comercial'):
+                raise ValueError('Indica usuario y perfil válidos.')
+            if not isinstance(password, str) or len(password) > 256 or type(active) is not bool:
+                raise ValueError('Clave o estado inválidos.')
+            with transaction.atomic(using=account_db):
+                user = User.objects.using(account_db).filter(username=username).first()
+                if request.method == 'POST' and user:
+                    raise ValueError('El usuario ya existe.')
+                if request.method == 'PUT' and not user:
+                    raise ValueError('El usuario no existe.')
+                if not user and not password:
+                    raise ValueError('Introduce una clave para el nuevo usuario.')
+                if user and role_for(user, account_db) == 'admin' and (role != 'admin' or not active):
+                    if not User.objects.using(account_db).filter(is_active=True, groups__name='Admin').exclude(pk=user.pk).exists():
+                        raise ValueError('Debe quedar al menos un administrador activo.')
+                user = user or User(username=username)
+                user.is_active = active
+                if password:
+                    user.password = make_password(password)
+                user.save(using=account_db)
+                user.groups.set([Group.objects.using(account_db).get(name='Admin' if role == 'admin' else 'Comercial')])
+                if user.pk == request.session.get('user_id'):
+                    request.session['password_version'] = user.password
+        return jsonify(users=[{'username': user.username, 'role': role_for(user, account_db) or
+                              ('admin' if user.groups.using(account_db).filter(name='Admin').exists() else 'comercial'),
+                              'active': user.is_active}
+                             for user in User.objects.using(account_db).order_by('username')])
 
     return PortalHandler(patterns)
 

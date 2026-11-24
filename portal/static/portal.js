@@ -144,6 +144,7 @@ function navigate() {
   document.title = `${views[view][0]} · Arby`;
   $('savebar').hidden = !['audio', 'experience'].includes(view);
   if (!$('portal').hidden) {
+    if (view === 'configuration') loadUsers().catch(error => notice(error.message, true));
     if (view === 'configuration' && !configurationLoaded) loadConfiguration().catch(error => notice(error.message, true));
     if (view === 'visits') loadVisits().catch(error => { $('visits-summary').textContent = error.message; });
     if (currentRole === 'admin' && view === 'audio' && (!audioInventory || Date.now() - audioChecked > 3000)) loadAudio().catch(error => notice(error.message, true));
@@ -426,7 +427,7 @@ $('visits-form').addEventListener('submit', event => {
 $('login-form').addEventListener('submit', event => {
   event.preventDefault();
   guarded(event.submitter, async () => {
-    const result = await api('/api/login', 'POST', {password: $('password').value, role: $('profile').value});
+    const result = await api('/api/login', 'POST', {password: $('password').value, username: $('username').value});
     $('password').value = '';
     csrf = result.csrf;
     await showPortal();
@@ -857,4 +858,37 @@ $('configuration-form').addEventListener('submit', event => {
     await refresh();
     notice('Configuración guardada. Usa «Aplicar y reiniciar Arby» para activar los cambios.');
   });
+});
+
+let portalUsers = [];
+async function loadUsers() {
+  const data = await api('/api/admin/users');
+  portalUsers = data.users;
+  $('users-list').replaceChildren();
+  for (const user of portalUsers) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'secondary';
+    button.textContent = `${user.username} · ${user.role}${user.active ? '' : ' · Inactivo'}`;
+    button.addEventListener('click', () => {
+      $('account-username').value = user.username;
+      $('account-role').value = user.role;
+      $('account-active').checked = user.active;
+      $('account-password').value = '';
+    });
+    $('users-list').append(button);
+  }
+}
+$('users-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const username = $('account-username').value;
+  try {
+    await api('/api/admin/users', portalUsers.some(user => user.username === username) ? 'PUT' : 'POST', {
+      username, role: $('account-role').value, password: $('account-password').value,
+      active: $('account-active').checked,
+    });
+    $('account-password').value = '';
+    await loadUsers();
+    notice('Usuario guardado.');
+  } catch (error) { notice(error.message, true); }
 });

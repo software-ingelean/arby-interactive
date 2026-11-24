@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Arby · Centro de soporte</title>
-  <link rel="stylesheet" href="/static/portal.css?v=admin-categories-2">
-  <script src="/static/portal.js?v=admin-categories-2" defer></script>
+  <link rel="stylesheet" href="/static/portal.css?v=users-1">
+  <script src="/static/portal.js?v=users-1" defer></script>
 </head>
 <body>
   <section id="login" class="login" hidden>
@@ -14,7 +14,7 @@
     <h1>Todo listo para conversar.</h1>
     <p>Un lugar para cuidar de Arby durante la feria.</p>
     <form id="login-form">
-      <label for="profile">Perfil</label><select id="profile"><option value="comercial">Comercial</option><option value="admin">Admin</option></select>
+      <label for="username">Usuario</label><input id="username" autocomplete="username" required maxlength="150">
       <label for="password">Clave de acceso</label>
       <input id="password" type="password" autocomplete="current-password" required maxlength="256">
       <button type="submit">Entrar al panel <span aria-hidden="true">↗</span></button>
@@ -163,6 +163,18 @@
         <div class="callout"><strong>Antes de retirar la alimentación</strong><p>Espera a que el sistema termine de apagarse. Que el panel deje de responder no confirma por sí solo que el apagado haya finalizado.</p></div>
       </section>
       <section data-view="configuration" hidden>
+        <article class="panel">
+          <h2>Usuarios del portal</h2>
+          <p class="hint">Selecciona una cuenta para editarla o escribe un usuario nuevo. Deja la clave vacía para conservarla.</p>
+          <div id="users-list" class="actions"></div>
+          <form id="users-form">
+            <label for="account-username">Usuario</label><input id="account-username" required maxlength="150" autocomplete="off">
+            <label for="account-role">Perfil</label><select id="account-role"><option value="comercial">Comercial</option><option value="admin">Admin</option></select>
+            <label for="account-password">Nueva clave</label><input id="account-password" type="password" maxlength="256" autocomplete="new-password">
+            <label class="check"><input id="account-active" type="checkbox" checked> Cuenta activa</label>
+            <button type="submit">Guardar usuario</button>
+          </form>
+        </article>
         <article class="panel">
           <h2>Configuración de Arby</h2>
           <p class="hint">Edita los valores y guarda. Pulsa <strong>?</strong> para consultar qué hace un parámetro.</p>

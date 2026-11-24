@@ -57,31 +57,34 @@ absoluta del repositorio y ejecuta `sudo systemctl daemon-reload` antes de reini
 
 El portal usa Django 5.2 y Waitress; mantiene las rutas existentes y la base SQLite.
 Arranca desde la raíz del repositorio con `.venv/bin/python -m portal`, incluido
-el servicio systemd existente. No necesita migraciones de Django: las preferencias
-y visitas conservan sus tablas y las sesiones usan memoria del proceso. Mantén
-un único proceso Waitress con sus hilos; varios workers necesitarían un almacén
-compartido de sesiones e intentos. Reiniciar el portal cierra las sesiones.
+el servicio systemd existente. Al iniciar, aplica automáticamente las migraciones de autenticación de Django
+sobre `config/arby_settings.sqlite3`, conservando las tablas de preferencias y visitas.
+Las sesiones usan memoria del proceso. Mantén un único proceso Waitress con sus
+hilos; reiniciar el portal cierra las sesiones.
 
-Hay exactamente dos perfiles, cada uno con su clave configurada en
-`/etc/arby/portal.env`:
+Los perfiles corresponden a los grupos de Django **Admin** y **Comercial**.
+Comercial conserva acceso a resumen, visitas, demos, ajustes básicos y reinicio de
+Arby. Admin también puede gestionar configuración avanzada, dispositivos, conexión,
+energía, depuración y usuarios.
 
-| Perfil | Acceso |
-| --- | --- |
-| Comercial | Resumen, visitas y CSV, demos, modo e intervalos, frases periódicas, voz y velocidad, brillo, reinicio de Arby. |
-| Admin | Todo lo anterior, dispositivos, ganancia, Trill, conexión, energía, depuración y Administración. |
+En una base sin usuarios se carga `portal/fixtures/initial_users.json`:
 
-`ARBY_PORTAL_PASSWORD_HASH` sigue siendo la clave de **admin** y conserva los
-hashes Werkzeug de instalaciones anteriores. Agrega
-`ARBY_PORTAL_COMMERCIAL_PASSWORD_HASH` con un hash distinto para **comercial**.
-Si no configuras este último, el acceso comercial queda deshabilitado. El perfil
-se selecciona al entrar y se valida con su propia clave; los permisos se comprueban
-en la API, además de ocultar las opciones en pantalla. No se crean claves por defecto.
+| Usuario | Contraseña inicial | Perfil |
+| --- | --- | --- |
+| `admin` | `1234` | Admin |
+| `comercial` | `1234` | Comercial |
 
-Puedes generar cada hash con Django, sin imprimir la clave:
+El fixture contiene hashes de Django y solo se carga si la tabla de usuarios está
+vacía: reiniciar no restablece claves. Si existen los hashes antiguos
+`ARBY_PORTAL_PASSWORD_HASH` o `ARBY_PORTAL_COMMERCIAL_PASSWORD_HASH` durante la
+creación inicial, se conservan en las cuentas respectivas. Después del primer
+arranque, cambiar esas variables ya no cambia las claves de la base de datos.
 
-```bash
-.venv/bin/python -c 'from getpass import getpass; from portal.server import configure_django; configure_django(); from django.contrib.auth.hashers import make_password; print(make_password(getpass("Clave del perfil: ")))'
-```
+Entra con usuario y clave. En **Administración → Usuarios del portal**, selecciona
+una cuenta para cambiar su clave, perfil o estado; para crear otra, escribe un
+usuario nuevo y una clave. Dejar la clave vacía conserva la actual. No requiere
+reiniciar. Cambiar la clave o desactivar una cuenta invalida sus otras sesiones en
+la siguiente petición. Siempre debe quedar al menos un administrador activo.
 
 La sección **Administración** es la única fuente de configuración de Arby.
 Incluye claves del proveedor, modelos, escucha, micrófono, voz, ojos, tira LED,
@@ -126,8 +129,8 @@ Los controles se guardan en `support_settings` dentro de
 cuando crea este archivo en una instalación con usuario `arby-portal`, le asigna
 ese propietario para que el portal también pueda gestionarlo. Las claves nunca se
 devuelven al navegador ni se guardan en SQLite. Respalda ambos archivos y conserva
-sus permisos al mover la instalación. Las credenciales de acceso al propio portal
-siguen en `/etc/arby/portal.env` y no se importan desde el `.env` del proyecto.
+sus permisos al mover la instalación. Las cuentas del portal se guardan en las tablas de autenticación de Django
+en SQLite y no se importan desde el `.env` del proyecto.
 
 **Push to talk:** activa `ARBY_PUSH_TO_TALK=true` con entrada `voice` y micrófono
 habilitado, o guarda la opción en Administración y aplica/reinicia Arby.
@@ -151,8 +154,7 @@ sudo systemctl restart arby-portal.service arby.service
 
 Conserva los extras que use tu instalación y `--inexact` para no retirar bindings
 locales como `rgbmatrix`. La unidad conserva su compatibilidad; para consultar `.env` protegido, actualiza
-el ayudante como se indica arriba. Define el hash comercial en `/etc/arby/portal.env` antes de reiniciar el
-portal si quieres habilitar ambos perfiles. Recarga el navegador. Comprueba que
+el ayudante como se indica arriba. El primer arranque crea las dos cuentas iniciales si no hay usuarios. Recarga el navegador. Comprueba que
 comercial no puede acceder a Administración, Conexión ni acciones de la Raspberry,
 y que admin conserva la configuración instalada. La migración del portal no cambia
 el comportamiento síncrono de las operaciones existentes de red y Bluetooth.
@@ -194,7 +196,7 @@ en Administración. Restablecer un campo recupera el valor predeterminado de Arb
 ## Acceder por todas las IP locales (puerto 8080)
 
 El servicio de este repositorio carga `/etc/arby/portal.env`. En la Raspberry,
-edita ese archivo conservando el hash de la clave y deja una sola definición de
+edita ese archivo y deja una sola definición de
 cada variable:
 
 ```bash
@@ -302,23 +304,17 @@ la migración; no cambies sus permisos para dar acceso al portal. El ayudante pu
 leerlo durante esa importación.
 Las credenciales del portal se configuran aparte.
 
-3. Genera un hash (la clave se solicita sin mostrarla):
-
-```bash
-.venv/bin/python -c 'from getpass import getpass; from werkzeug.security import generate_password_hash; print(generate_password_hash(getpass("Clave de soporte: ")))'
-```
-
-Crea `/etc/arby/portal.env` con propietario `root:arby-support` y modo `0640`:
+3. Crea `/etc/arby/portal.env` con propietario `root:arby-support` y modo `0640`:
 
 ```text
-ARBY_PORTAL_PASSWORD_HASH=PEGA_EL_HASH_GENERADO
 ARBY_PORTAL_HOST=0.0.0.0
 ARBY_PORTAL_PORT=8080
 ```
 
-El servidor exige un hash, limita intentos de acceso y protege acciones con una
-sesión y token CSRF. Las sesiones caducan tras cuatro horas sin uso y también al
-reiniciar el portal. Para cambiar la clave, reemplaza el hash y reinicia el portal.
+El primer arranque crea las cuentas iniciales descritas arriba. Puedes gestionar
+sus claves desde Administración. El servidor limita intentos de acceso y protege
+acciones con una sesión y token CSRF. Las sesiones caducan tras cuatro horas sin
+uso y también al reiniciar el portal.
 
 4. Instala el ayudante privilegiado. **Debe ser una copia propiedad de root**,
    nunca un enlace a un archivo modificable por el servidor web.
@@ -356,8 +352,7 @@ interactiva y no se deben usar como perfil de feria sin escritorio.
 
 ## Ejecución manual y desarrollo
 
-Instala `uv sync --inexact --extra support` y exporta `ARBY_PORTAL_PASSWORD_HASH` con el hash
-generado. Ejecuta `.venv/bin/python -m portal`.
+Instala `uv sync --inexact --extra support` y ejecuta `.venv/bin/python -m portal`.
 Para publicar el estado del proceso manual usa `ARBY_SUPPORT=true
 .venv/bin/python run_arby.py` en una sola línea, con los permisos habituales del
 hardware. El portal no inicia otro proceso de Arby por su cuenta. Sin instalar
