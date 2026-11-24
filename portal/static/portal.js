@@ -870,25 +870,46 @@ async function loadUsers() {
     button.type = 'button';
     button.className = 'secondary';
     button.textContent = `${user.username} · ${user.role}${user.active ? '' : ' · Inactivo'}`;
-    button.addEventListener('click', () => {
-      $('account-username').value = user.username;
-      $('account-role').value = user.role;
-      $('account-active').checked = user.active;
-      $('account-password').value = '';
-    });
+    button.setAttribute('aria-haspopup', 'dialog');
+    button.addEventListener('click', () => openUserDialog(user));
     $('users-list').append(button);
   }
 }
+function openUserDialog(user = null) {
+  $('users-form').reset();
+  $('users-error').hidden = true;
+  $('users-dialog-title').textContent = user ? 'Editar usuario' : 'Nuevo usuario';
+  $('users-dialog-help').textContent = user ? 'Deja la clave vacía para conservarla.' : 'Asigna un perfil y una clave a la nueva cuenta.';
+  $('account-username').value = user?.username ?? '';
+  $('account-username').readOnly = Boolean(user);
+  $('account-role').value = user?.role ?? 'comercial';
+  $('account-active').checked = user?.active ?? true;
+  $('account-password').required = !user;
+  $('users-dialog').showModal();
+}
+$('new-user').addEventListener('click', () => openUserDialog());
+$('users-cancel').addEventListener('click', () => $('users-dialog').close());
+$('users-dialog').addEventListener('close', () => {
+  $('account-password').value = '';
+});
 $('users-form').addEventListener('submit', async event => {
   event.preventDefault();
   const username = $('account-username').value;
+  const submit = event.submitter;
+  submit.disabled = true;
+  $('users-error').hidden = true;
   try {
-    await api('/api/admin/users', portalUsers.some(user => user.username === username) ? 'PUT' : 'POST', {
+    await api('/api/admin/users', $('account-username').readOnly ? 'PUT' : 'POST', {
       username, role: $('account-role').value, password: $('account-password').value,
       active: $('account-active').checked,
     });
-    $('account-password').value = '';
+    $('users-dialog').close();
     await loadUsers();
     notice('Usuario guardado.');
-  } catch (error) { notice(error.message, true); }
+  } catch (error) {
+    if ($('users-dialog').open) {
+      $('users-error').textContent = error.message;
+      $('users-error').hidden = false;
+    } else notice(error.message, true);
+  } finally { submit.disabled = false; }
 });

@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Arby · Centro de soporte</title>
-  <link rel="stylesheet" href="/static/portal.css?v=users-1">
-  <script src="/static/portal.js?v=users-1" defer></script>
+  <link rel="stylesheet" href="/static/portal.css?v=users-modal-1">
+  <script src="/static/portal.js?v=users-modal-1" defer></script>
 </head>
 <body>
   <section id="login" class="login" hidden>
@@ -164,16 +164,10 @@
       </section>
       <section data-view="configuration" hidden>
         <article class="panel">
-          <h2>Usuarios del portal</h2>
-          <p class="hint">Selecciona una cuenta para editarla o escribe un usuario nuevo. Deja la clave vacía para conservarla.</p>
+          <div class="section-title"><h2>Usuarios del portal</h2><button id="new-user" type="button" class="secondary" aria-haspopup="dialog">Nuevo usuario</button></div>
+          <p class="hint">Selecciona una cuenta para editarla.</p>
           <div id="users-list" class="actions"></div>
-          <form id="users-form">
-            <label for="account-username">Usuario</label><input id="account-username" required maxlength="150" autocomplete="off">
-            <label for="account-role">Perfil</label><select id="account-role"><option value="comercial">Comercial</option><option value="admin">Admin</option></select>
-            <label for="account-password">Nueva clave</label><input id="account-password" type="password" maxlength="256" autocomplete="new-password">
-            <label class="check"><input id="account-active" type="checkbox" checked> Cuenta activa</label>
-            <button type="submit">Guardar usuario</button>
-          </form>
+
         </article>
         <article class="panel">
           <h2>Configuración de Arby</h2>
@@ -186,6 +180,18 @@
     </main>
   </div>
   <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+  <dialog id="users-dialog" aria-labelledby="users-dialog-title" aria-describedby="users-dialog-help">
+    <h2 id="users-dialog-title">Nuevo usuario</h2>
+    <p id="users-dialog-help" class="hint">Asigna un perfil y una clave a la nueva cuenta.</p>
+          <form id="users-form">
+            <label for="account-username">Usuario</label><input id="account-username" autofocus required maxlength="150" autocomplete="off">
+            <label for="account-role">Perfil</label><select id="account-role"><option value="comercial">Comercial</option><option value="admin">Admin</option></select>
+            <label for="account-password">Nueva clave</label><input id="account-password" type="password" maxlength="256" autocomplete="new-password">
+            <label class="check"><input id="account-active" type="checkbox" checked> Cuenta activa</label>
+            <p id="users-error" class="hint" role="alert" hidden></p>
+            <div class="actions"><button id="users-cancel" type="button" class="secondary">Cancelar</button><button type="submit">Guardar usuario</button></div>
+          </form>
+  </dialog>
   <dialog id="configuration-help-dialog" aria-labelledby="configuration-help-title">
     <h2 id="configuration-help-title"></h2>
     <code id="configuration-help-variable"></code>
