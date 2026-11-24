@@ -155,7 +155,7 @@ def _is_public_chunk(chunk):
 
 @dataclass(frozen=True)
 class BotConfig:
-    model: str = "gemini-flash-latest"
+    model: str = "gemini-3.1-flash-lite"
     history_turns: int = 10
     retrieval_k: int = 4
     min_similarity: float = 0.30
@@ -164,10 +164,20 @@ class BotConfig:
     timeout_seconds: float = 30.0
     max_input_chars: int = 4000
     event_mode: bool = False
-    fallback_models: tuple[str, ...] = ("gemini-flash-lite-latest",)
+    fallback_models: tuple[str, ...] = ()
     model_cooldown_seconds: float = 60.0
+    request_attempts: int = 3
+    retry_initial_delay_seconds: float = 1.0
+    retry_max_delay_seconds: float = 2.0
 
     def __post_init__(self):
+        if type(self.request_attempts) is not int or self.request_attempts < 1:
+            raise ValueError("request_attempts debe ser un entero positivo.")
+        delays = (self.retry_initial_delay_seconds, self.retry_max_delay_seconds)
+        if any(not math.isfinite(delay) or delay <= 0 for delay in delays):
+            raise ValueError("Los tiempos de reintento deben ser positivos y finitos.")
+        if self.retry_max_delay_seconds < self.retry_initial_delay_seconds:
+            raise ValueError("retry_max_delay_seconds no puede ser menor al inicial.")
         if not self.model.strip() or any(not model.strip() for model in self.fallback_models):
             raise ValueError("Los nombres de modelos no pueden estar vacíos.")
         if not math.isfinite(self.model_cooldown_seconds) or self.model_cooldown_seconds <= 0:
@@ -193,10 +203,11 @@ class ArbyBot:
         self.config = config or BotConfig(
             model=os.getenv("GEMINI_MODEL", "").strip() or BotConfig().model,
             fallback_models=tuple(m.strip() for m in os.getenv(
-                "GEMINI_FALLBACK_MODELS", "gemini-flash-lite-latest").split(",") if m.strip()),
+                "GEMINI_FALLBACK_MODELS", "").split(",") if m.strip()),
             model_cooldown_seconds=float(os.getenv("ARBY_MODEL_COOLDOWN_SECONDS", "60")))
         self._models = tuple(dict.fromkeys((self.config.model, *self.config.fallback_models)))
         self._model_retry_at = {}
+        self._model_errors = {}
         self.last_model = None
         self._lock = RLock()
         self._closed = False
@@ -225,6 +236,7 @@ class ArbyBot:
                 api_key=key,
                 http_options=types.HttpOptions(
                     timeout=int(self.config.timeout_seconds * 1000),
+                    # The application retries below; avoid multiplying attempts.
                     retry_options=types.HttpRetryOptions(
                         attempts=1,
                         initial_delay=1.0,
@@ -319,34 +331,76 @@ class ArbyBot:
                 self._confirmed = {"id": None, "name": name_key.title(), "text": ""}
         return None
 
+    @staticmethod
+    def _is_transient_error(error):
+        if getattr(error, "code", None) in (408, 429, 500, 502, 503, 504):
+            return True
+        if isinstance(error, (TimeoutError, ConnectionError)):
+            return True
+        from httpx import TransportError
+        return isinstance(error, TransportError)
+
     def _generate(self, contents, generation_config):
-        """Try available models once; retain cooldowns across session resets."""
+        """Retry transient failures without disabling a model after server errors.
+
+        A 404 skips that model briefly; an exhausted 429 respects a cooldown.
+        Server/transport failures remain eligible for the next user message.
+        Explicit fallback models are tried only after the primary attempts.
+        """
         self.last_model = None
-        last_error = None
+        errors = []
         for model in self._models:
             if self._model_retry_at.get(model, 0) > time.monotonic():
+                cached_error = self._model_errors.get(model)
+                if cached_error is not None:
+                    errors.append(cached_error)
                 continue
-            try:
-                response = self._client.models.generate_content(
-                    model=model, contents=contents, config=generation_config)
-            except Exception as error:
-                code = getattr(error, "code", None)
-                if code not in (404, 408, 429, 500, 502, 503, 504) and not isinstance(
-                        error, (TimeoutError, ConnectionError)):
-                    from httpx import TransportError
-                    if not isinstance(error, TransportError):
+            for attempt in range(self.config.request_attempts):
+                try:
+                    response = self._client.models.generate_content(
+                        model=model, contents=contents, config=generation_config)
+                except Exception as error:
+                    code = getattr(error, "code", None)
+                    if code == 404:
+                        self._model_retry_at[model] = (
+                            time.monotonic() + self.config.model_cooldown_seconds)
+                        self._model_errors[model] = error
+                        errors.append(error)
+                        LOGGER.warning("Arby model not found: %s | HTTP: 404", model)
+                        break
+                    if not self._is_transient_error(error):
                         raise
-                self._model_retry_at[model] = time.monotonic() + self.config.model_cooldown_seconds
-                LOGGER.warning("Arby model unavailable: %s | HTTP: %s | Error: %s",
-                               model, code, type(error).__name__)
-                last_error = error
-                continue
-            self._model_retry_at.pop(model, None)
-            self.last_model = model
-            return response
-        if last_error is not None:
-            raise last_error
-        raise RuntimeError("Todos los modelos están en pausa temporal; intenta más tarde.")
+                    LOGGER.warning(
+                        "Arby transient failure: %s | HTTP: %s | Attempt: %s/%s | Error: %s",
+                        model, code, attempt + 1, self.config.request_attempts,
+                        type(error).__name__)
+                    if attempt + 1 < self.config.request_attempts:
+                        delay = min(
+                            self.config.retry_initial_delay_seconds * (2 ** attempt),
+                            self.config.retry_max_delay_seconds)
+                        time.sleep(delay)
+                        continue
+                    errors.append(error)
+                    if code == 429:
+                        self._model_retry_at[model] = (
+                            time.monotonic() + self.config.model_cooldown_seconds)
+                        self._model_errors[model] = error
+                    else:
+                        self._model_retry_at.pop(model, None)
+                        self._model_errors.pop(model, None)
+                    break
+                else:
+                    self._model_retry_at.pop(model, None)
+                    self._model_errors.pop(model, None)
+                    self.last_model = model
+                    return response
+        if errors:
+            # A missing fallback must not hide the primary model's 503/timeout.
+            for error in errors:
+                if self._is_transient_error(error):
+                    raise error
+            raise errors[0]
+        raise RuntimeError("No hay modelos configurados disponibles para esta solicitud.")
 
     def respond(self, text: str) -> dict:
         if not isinstance(text, str):
