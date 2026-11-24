@@ -19,16 +19,42 @@ class MicrophoneInput:
         self.push_to_talk = getattr(config, "push_to_talk", False)
         self.udp_socket = None
         self.udp_thread = None
+        self.button_peer = None
+        self.closing = False
         self._repeat_index = 0
         self.track_visits = getattr(runtime, "visit_recorder", None) is not None
         self.pipeline = ArbyPipeline(config, on_question=self.submit,
                                      on_unrecognized=self.request_repetition,
                                      is_paused=self.is_paused,
                                      on_voice_start=self.voice_started,
-                                     on_conversation_start=(lambda: runtime.visit_event('start')) if self.track_visits else None,
-                                     on_conversation_end=(lambda: runtime.visit_event('end')) if self.track_visits else None)
+                                     on_conversation_start=self.conversation_started,
+                                     on_conversation_end=self.conversation_ended)
         self.pipeline.google_worker.debug = getattr(runtime, "debug", None)
         self.thread = threading.Thread(target=self.run, name="arby-microphone", daemon=True)
+
+    def notify_button(self, active):
+        if not self.push_to_talk or self.udp_socket is None or self.button_peer is None:
+            return
+        try:
+            self.udp_socket.sendto(b'1' if active else b'0', (self.button_peer, 5006))
+        except OSError:
+            logging.getLogger(__name__).warning('No se pudo enviar el estado PTT al botón', exc_info=True)
+
+    def conversation_started(self):
+        self.notify_button(True)
+        if self.track_visits:
+            self.runtime.visit_event('start')
+
+    def conversation_ended(self):
+        self.notify_button(False)
+        if self.closing:
+            return
+        if self.push_to_talk:
+            self.runtime.interrupt_conversation()
+        if self.track_visits:
+            self.runtime.visit_event('end')
+        elif self.push_to_talk:
+            self.runtime.reset_session()
 
     def trace(self, message, **details):
         debug = getattr(self.runtime, 'debug', None)
@@ -95,7 +121,8 @@ class MicrophoneInput:
                     continue
                 if payload.strip() in (b"1", b"\x01"):
                     self.runtime.interrupt_ambient()
-                    self.pipeline.google_worker.activation_requested.set()
+                    self.button_peer = sender[0]
+                    self.pipeline.google_worker.toggle_conversation()
                     self.trace("Botón UDP recibido", port=5005, sender=sender[0])
                 else:
                     self.trace("Paquete UDP ignorado: se esperaba 1 o 0x01", bytes=len(payload), sender=sender[0])
@@ -119,10 +146,13 @@ class MicrophoneInput:
             self.input_done.set()
 
     def close(self):
+        self.closing = True
         self.pipeline.close()
         if self.udp_thread is not None:
             self.udp_thread.join(timeout=1.0)
         if self.udp_socket is not None:
+            self.pipeline.google_worker.close_conversation()
+            self.notify_button(False)
             self.udp_socket.close()
         if self.thread.ident is not None:
             self.thread.join(timeout=2.0)

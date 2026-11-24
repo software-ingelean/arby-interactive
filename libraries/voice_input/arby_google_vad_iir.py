@@ -20,6 +20,7 @@ import argparse
 import collections
 from concurrent.futures import Future
 from dataclasses import dataclass
+from functools import wraps
 import queue
 import re
 import signal
@@ -173,6 +174,14 @@ class SpeechSegment:
     generation: int
 
 
+def conversation_locked(method):
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with self.conversation_lock:
+            return method(self, *args, **kwargs)
+    return locked
+
+
 class GoogleWorker(threading.Thread):
     """Realiza las consultas de Google fuera del hilo de captura."""
 
@@ -193,6 +202,9 @@ class GoogleWorker(threading.Thread):
         push_to_talk=False,
     ):
         super().__init__(daemon=True, name="arby-recognition")
+        self.conversation_lock = threading.RLock()
+        self.conversation_epoch = 0
+        self.conversation_started_at = None
         self.push_to_talk = push_to_talk
         self.activation_requested = threading.Event()
         self.conversation_active = threading.Event()
@@ -235,16 +247,36 @@ class GoogleWorker(threading.Thread):
                     self.debug.stage("reconocimiento", "Esperando audio", "arby_google_vad_iir.py · GoogleWorker.run → Queue.get")
                 self.jobs.task_done()
 
+    @conversation_locked
     def _activate_requested(self):
-        # Only the recognition worker mutates conversation state.
+        # Compatibility for callers that signal the worker directly.
         if self.activation_requested.is_set():
             self.activation_requested.clear()
-            if self.mode == "WAKE":
-                log("[PTT] Activación UDP procesada; abriendo escucha.")
-                self._listen_for_command()
-            else:
-                log("[PTT] Pulsación recibida con conversación activa.")
+            self.toggle_conversation()
 
+    @conversation_locked
+    def toggle_conversation(self):
+        if self.stop_event.is_set():
+            return
+        if self.mode == 'WAKE':
+            log('[PTT] Activación UDP procesada; abriendo escucha.')
+            self._listen_for_command()
+        else:
+            self.close_conversation()
+            log('[PTT] Segunda pulsación; conversación cerrada.')
+
+    @conversation_locked
+    def close_conversation(self):
+        if self.mode == 'WAKE':
+            return
+        self.mode, self.deadline = 'WAKE', None
+        self.conversation_epoch += 1
+        self.repeat_prompt = self.answer_future = None
+        self.conversation_active.clear()
+        if self.on_conversation_end:
+            self.on_conversation_end()
+
+    @conversation_locked
     def _resume_followup(self):
         # Reopen only after playback AND the speaker-tail pause. Slow model calls
         # and speech do not consume the visitor's minute to ask another question.
@@ -277,6 +309,7 @@ class GoogleWorker(threading.Thread):
                     log('[CONVERSACION] La respuesta terminó con error; la escucha continúa.')
                 self._listen_for_command()
 
+    @conversation_locked
     def _request_repeat(self, generation):
         """Keep the session alive; throttle prompts instead of permanently capping them."""
         if self.stop_event.is_set():
@@ -312,6 +345,7 @@ class GoogleWorker(threading.Thread):
         else:
             log('[REPETIR] No se pudo encolar el aviso; revisa si Arby está ocupado.')
 
+    @conversation_locked
     def _expire_followup(self, at=None):
         if at is None:
             # Finish an utterance that began inside the minute even if STT runs
@@ -323,42 +357,48 @@ class GoogleWorker(threading.Thread):
         if (self.mode == 'COMMAND' and self.deadline is not None
                 and self.repeat_prompt is None and self.answer_future is None
                 and (time.monotonic() if at is None else at) >= self.deadline):
-            self.mode, self.deadline = 'WAKE', None
-            self.conversation_active.clear()
-            if self.on_conversation_end:
-                self.on_conversation_end()
+            self.close_conversation()
             log("[CONVERSACION] Terminó la ventana de escucha. " +
                 ("Esperando botón UDP." if self.push_to_talk else "Esperando 'Arby'."))
 
+    @conversation_locked
     def _listen_for_command(self):
-        if self.mode == 'WAKE' and self.on_conversation_start:
-            self.on_conversation_start()
+        starting = self.mode == 'WAKE'
         self.mode = 'COMMAND'
         self.conversation_active.set()
+        if starting:
+            self.conversation_epoch += 1
+            self.conversation_started_at = time.monotonic()
+            if self.on_conversation_start:
+                self.on_conversation_start()
         self.deadline = time.monotonic() + CONVERSATION_IDLE_SECONDS
         self.last_repeat_at = float('-inf')
         log('[CONVERSACION] Activa durante 60 s; puedes preguntar sin decir Arby.')
 
     def _recognize(self, pcm):
-        if self.stop_event.is_set() or self.is_paused():
-            return
-        self._resume_followup()
-        segment = pcm if isinstance(pcm, SpeechSegment) else None
-        if segment is not None and segment.generation != self.generation():
-            log('[GOOGLE] Segmento descartado: audio anterior a una pausa.')
-            return
-        self._expire_followup(at=segment.started_at if segment else time.monotonic())
-        if segment is not None:
-            pcm = segment.pcm
-        if self.repeat_prompt is not None or self.answer_future is not None:
-            return
-        if self.push_to_talk and self.mode == "WAKE":
-            return
-        audio = sr.AudioData(pcm, FS_OUT, 2)
-        generation = self.generation()
-        start = time.perf_counter()
-        if self.debug:
-            self.debug.stage("reconocimiento", "Reconociendo audio con Google", "arby_google_vad_iir.py · _recognize → recognize_google", self.recognizer.operation_timeout + 5)
+        with self.conversation_lock:
+            if self.stop_event.is_set() or self.is_paused():
+                return
+            self._resume_followup()
+            segment = pcm if isinstance(pcm, SpeechSegment) else None
+            if segment is not None and (segment.generation != self.generation() or
+                    (self.push_to_talk and self.conversation_started_at is not None
+                     and segment.started_at < self.conversation_started_at)):
+                log('[GOOGLE] Segmento descartado: audio anterior a una pausa.')
+                return
+            self._expire_followup(at=segment.started_at if segment else time.monotonic())
+            if segment is not None:
+                pcm = segment.pcm
+            if self.repeat_prompt is not None or self.answer_future is not None:
+                return
+            if self.push_to_talk and self.mode == "WAKE":
+                return
+            audio = sr.AudioData(pcm, FS_OUT, 2)
+            generation = self.generation()
+            epoch = self.conversation_epoch
+            start = time.perf_counter()
+            if self.debug:
+                self.debug.stage("reconocimiento", "Reconociendo audio con Google", "arby_google_vad_iir.py · _recognize → recognize_google", self.recognizer.operation_timeout + 5)
 
         try:
             text = self.recognizer.recognize_google(
@@ -374,7 +414,9 @@ class GoogleWorker(threading.Thread):
         except sr.UnknownValueError:
             elapsed = time.perf_counter() - start
             log(f"[GOOGLE] (no reconocido) | {elapsed:.2f}s | estado={self.mode}")
-            self._request_repeat(generation)
+            with self.conversation_lock:
+                if epoch == self.conversation_epoch:
+                    self._request_repeat(generation)
             return
 
         except sr.RequestError as exc:
@@ -382,31 +424,37 @@ class GoogleWorker(threading.Thread):
             if self.debug:
                 self.debug.event("reconocimiento", "Error del servicio de reconocimiento", "error", error=type(exc).__name__)
             log(f"[GOOGLE] Error de servicio/red: {type(exc).__name__} | {elapsed:.2f}s")
-            self._request_repeat(generation)
+            with self.conversation_lock:
+                if epoch == self.conversation_epoch:
+                    self._request_repeat(generation)
             return
 
         except Exception as exc:
             log(f"[GOOGLE] Error: {type(exc).__name__}")
-            self._request_repeat(generation)
+            with self.conversation_lock:
+                if epoch == self.conversation_epoch:
+                    self._request_repeat(generation)
             return
 
-        if (self.stop_event.is_set() or self.is_paused()
-                or generation != self.generation()):
-            return
-        matched, remainder = wake_match(text)
-        # During an active conversation, mentioning Arby inside a question is
-        # ordinary speech. Strip the name only when it starts the utterance.
-        leading_wake = bool(re.match(r'^\W*(?:arby|arbi|barbie|army|aby|abby)\b', text, re.IGNORECASE))
-        if matched and (self.mode == 'WAKE' or leading_wake):
-            log('[ARBY] ACTIVADO')
-            self._listen_for_command()
-            if remainder:
-                log(f'[PREGUNTA] {remainder}')
-                self.deliver(remainder)
-        elif self.mode == 'COMMAND':
-            log(f'[PREGUNTA] {text}')
-            self.deliver(text)
+        with self.conversation_lock:
+            if (self.stop_event.is_set() or self.is_paused()
+                    or generation != self.generation() or epoch != self.conversation_epoch):
+                return
+            matched, remainder = wake_match(text)
+            # During an active conversation, mentioning Arby inside a question is
+            # ordinary speech. Strip the name only when it starts the utterance.
+            leading_wake = bool(re.match(r'^\W*(?:arby|arbi|barbie|army|aby|abby)\b', text, re.IGNORECASE))
+            if matched and (self.mode == 'WAKE' or leading_wake):
+                log('[ARBY] ACTIVADO')
+                self._listen_for_command()
+                if remainder:
+                    log(f'[PREGUNTA] {remainder}')
+                    self.deliver(remainder)
+            elif self.mode == 'COMMAND':
+                log(f'[PREGUNTA] {text}')
+                self.deliver(text)
 
+    @conversation_locked
     def deliver(self, text):
         if self.on_question is not None and not self.stop_event.is_set():
             try:

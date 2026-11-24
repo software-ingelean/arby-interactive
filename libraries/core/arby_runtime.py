@@ -61,6 +61,7 @@ class ArbyRuntime:
         self.events = Queue()
         self._lock = threading.RLock()
         self._stop = threading.Event()
+        self._conversation_cancel = threading.Event()
         self._visual = VisualState()
         self._thread = None
         self._closed = False
@@ -146,13 +147,20 @@ class ArbyRuntime:
                     queued_visitors = sum(item.kind != "ambient" for item in self._queue.queue)
                 if queued_visitors >= self._queue_capacity:
                     raise Full
-                self._queue.put_nowait(_Request(kind, payload, future))
+                cancel = self._conversation_cancel if kind in ('text', 'voice_text', 'fixed') else None
+                self._queue.put_nowait(_Request(kind, payload, future, cancel))
             except Full as exc:
                 raise RuntimeError("La cola está llena; espera a que Arby termine.") from exc
             self.debug.event("cola", "Solicitud recibida", kind=kind, pending=self.pending_count)
             self._activity_revision += 1
             self.interrupt_ambient()
             return future
+
+    def interrupt_conversation(self):
+        """Invalidate queued/current answers; the worker owns playback cleanup."""
+        with self._lock:
+            self._conversation_cancel.set()
+            self._conversation_cancel = threading.Event()
 
     def submit_text(self, text):
         """Console now; STT calls this same nonblocking method later."""
@@ -233,35 +241,36 @@ class ArbyRuntime:
             raise CancelledError()
         return None
 
-    def _speak_reply(self, reply):
+    def _speak_reply(self, reply, cancel=None):
         self.debug.stage("conversacion", "Preparando y reproduciendo voz", "arby_runtime.py · _speak_reply → tts.wait", 120)
         segments = reply["segments"]
         speak_segments = getattr(self.tts, "speak_segments", None)
         if not callable(speak_segments):
             # Compatibility with older TTS adapters and the muted preview.
             for segment in segments:
-                if self._stop.is_set():
+                if self._stop.is_set() or (cancel is not None and cancel.is_set()):
                     raise CancelledError()
-                self._speak(segment)
+                self._speak(segment, cancel)
             return
 
         def on_segment(index):
-            if self._stop.is_set():
+            if self._stop.is_set() or (cancel is not None and cancel.is_set()):
                 return
             segment = segments[index]
             self._set_visual(segment["matrix_state"],
                              validate_color(segment["strip_led"]["color"]), "speaking")
 
         with self._lock:
-            if self._stop.is_set():
+            if self._stop.is_set() or (cancel is not None and cancel.is_set()):
                 raise CancelledError()
             accepted = speak_segments([s["response"] for s in segments], on_segment=on_segment)
         if not accepted:
             raise RuntimeError("TTS rejected the sequence")
         while not self.tts.wait(0.05):
-            if self._stop.is_set():
+            if self._stop.is_set() or (cancel is not None and cancel.is_set()):
+                self.tts.stop()
                 raise CancelledError()
-        if self._stop.is_set():
+        if self._stop.is_set() or (cancel is not None and cancel.is_set()):
             raise CancelledError()
         if self.tts.last_error:
             self.events.put(("error", f"TTS: {self.tts.last_error}"))
@@ -313,7 +322,7 @@ class ArbyRuntime:
                 try:
                     if not request.future.set_running_or_notify_cancel():
                         continue
-                    if self._stop.is_set():
+                    if self._stop.is_set() or (request.cancel is not None and request.cancel.is_set()):
                         raise CancelledError()
                     self.debug.stage("conversacion", "Ejecutando solicitud", "arby_runtime.py · _work", 120)
                     self.debug.event("conversacion", "Solicitud iniciada", kind=request.kind)
@@ -338,8 +347,10 @@ class ArbyRuntime:
                             reply, request.future.retry_requested = self._model_reply(request.payload)
                         else:
                             reply = request.payload
+                        if request.cancel is not None and request.cancel.is_set():
+                            raise CancelledError()
                         self.events.put(("response", reply["response"]))
-                        self._speak_reply(reply)
+                        self._speak_reply(reply, request.cancel)
                     self.debug.event("conversacion", "Solicitud completada", kind=request.kind)
                     request.future.set_result(reply)
                 except CancelledError as exc:

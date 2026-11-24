@@ -140,8 +140,23 @@ binario `0x01`) a la IP de la Raspberry. No hace falta mantener pulsado ni decir
 VAD ni solicitudes de reconocimiento. El dispositivo de captura permanece abierto.
 La conversación permite 60 segundos para preguntar; cada respuesta completada
 renueva ese minuto después de reproducir el audio y esperar la pausa contra eco.
-Al vencer la ventana se vuelve a esperar el botón. Pulsaciones durante una
-conversación activa no reinician la sesión. Con la opción desactivada se conserva
+Al vencer la ventana se vuelve a esperar el botón. El botón funciona como interruptor: una segunda pulsación cierra la conversación,
+detiene la voz y descarta las preguntas y respuestas pendientes de esa sesión.
+Una consulta al proveedor que ya esté en curso puede terminar, pero su respuesta
+se descarta y no vuelve a abrir la escucha.
+
+Arby responde por UDP a la **IP del dispositivo que envió el último botón**, siempre
+al puerto **5006**, con texto ASCII:
+
+- `1`: conversación activa (incluye escucha, consulta al modelo y reproducción).
+- `0`: conversación cerrada por botón, por inactividad o al cerrar el micrófono.
+
+El ESP debe escuchar UDP en 5006 y puede usar ese estado para encender/apagar el
+indicador. Para cada pulsación envía un único `1` a `IP-DE-ARBY:5005` (también se
+acepta el byte `0x01`). Aplica antirrebote en el botón: dos paquetes válidos son
+dos pulsaciones. El puerto de origen del ESP no necesita ser 5006. Son avisos UDP
+por cambio de estado, sin confirmación ni reintento; el indicador debe comenzar
+apagado al arrancar. Con la opción desactivada se conserva
 la activación por voz. No hay botón de hablar en el navegador.
 
 Para actualizar desde Flask, respalda `config`, instala las nuevas dependencias
